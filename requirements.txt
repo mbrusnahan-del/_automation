@@ -1,0 +1,11 @@
+# Kingdom Structural automation — Python dependencies.
+#
+# Install with:
+#     python -m pip install -r requirements.txt
+#
+# Only one external dependency: python-docx (for rendering the contract).
+# Everything else uses the Python standard library (urllib, smtplib, re,
+# datetime, etc.) on purpose — keeps the production footprint small and
+# makes this trivially portable to n8n or a GitHub Action later.
+
+python-docx>=1.1.0

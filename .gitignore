@@ -1,0 +1,49 @@
+# ── Secrets ─────────────────────────────────────────────────────────────
+# Real values live in .env (never commit). .env.example is the public template.
+.env
+*.env.local
+*.env.production
+
+# ── Runtime state / generated logs ──────────────────────────────────────
+*.log
+client_sync_state.json
+excel_sync_state.json
+
+# Pending / queued email artifacts written by KS_EMAIL_MODE=stub
+_pending_email/
+
+# ── Python ──────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+
+# ── Caches and pickles produced by ad-hoc scripts ───────────────────────
+*.pkl
+
+# ── Backup / scratch files ──────────────────────────────────────────────
+*.bak
+*.bak.*
+*~
+~$*
+*.tmp
+
+# ── OS / OneDrive cruft ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor / IDE ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Local migration artifacts (one-off, not part of the pipeline) ───────
+migration/
