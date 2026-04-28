@@ -1,0 +1,206 @@
+{
+  "name": "KS A0 — Create Proposal Brief on new Project",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerMode": "pageAdded",
+        "databaseId": {
+          "__rl": true,
+          "value": "262b73dc-460e-8137-b3bb-000b62103b15",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "a0-trigger",
+      "name": "Notion: new Project",
+      "type": "n8n-nodes-base.notionTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "credentials": {
+        "notionApi": {
+          "name": "KS Notion"
+        }
+      },
+      "notes": "Polls Projects DB every minute. Fires when a new page appears."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.properties['Proposal Brief'].relation.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ ['Dead', 'IGNNROE FO RNOW', 'On Hold'].includes($json.properties['Engineering Status'].status && $json.properties['Engineering Status'].status.name) }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a0-gate",
+      "name": "Gate: no Brief AND active status",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 300],
+      "notes": "Mirrors sweep.py A0 filter: Proposal Brief empty AND Engineering Status not in {Dead, IGNNROE FO RNOW, On Hold}."
+    },
+    {
+      "parameters": {
+        "url": "=https://api.notion.com/v1/blocks/34ab73dc-460e-80bf-b97c-da13d53310e8/children?page_size=100",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a0-fetch-template",
+      "name": "Fetch Brief template blocks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "notes": "GET the template page's child blocks. These are the scope-checkbox / basic-services / reimbursables callouts that populate every new Brief."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Clean template blocks to pages.create input shape.\n// Strip read-only metadata and null fields (Notion input API rejects nulls).\nconst SAFE = new Set(['paragraph','heading_1','heading_2','heading_3','to_do','bulleted_list_item','numbered_list_item','callout','quote','divider','toggle']);\n\nfunction stripNulls(obj) {\n  if (Array.isArray(obj)) return obj.map(stripNulls);\n  if (obj && typeof obj === 'object') {\n    const out = {};\n    for (const k of Object.keys(obj)) {\n      if (obj[k] === null) continue;\n      out[k] = stripNulls(obj[k]);\n    }\n    return out;\n  }\n  return obj;\n}\n\nfunction cleanBlock(b) {\n  const t = b.type;\n  if (!SAFE.has(t)) return null;\n  const body = stripNulls(Object.assign({}, b[t] || {}));\n  return { object: 'block', type: t, [t]: body };\n}\n\nconst blocks = ($input.first().json.results || [])\n  .map(cleanBlock)\n  .filter(x => x !== null);\n\n// Pass through the Project row context from the trigger so the next node\n// can reference it alongside the cleaned blocks.\nconst project = $('Notion: new Project').first().json;\n\nreturn [{\n  json: {\n    projectId: project.id,\n    projectName: (project.properties['Project Name'].title[0] || {}).plain_text || '',\n    templateChildren: blocks,\n  },\n}];"
+      },
+      "id": "a0-clean-blocks",
+      "name": "Clean template blocks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: 'data_source_id', data_source_id: '6b64658f-5fb3-4329-b02c-3ac3cb8a0828' },\n  properties: {\n    Name: { title: [{ type: 'text', text: { content: $json.projectName } }] },\n    Project: { relation: [{ id: $json.projectId }] },\n    Status: { select: { name: 'Not Started' } }\n  },\n  children: $json.templateChildren\n}) }}",
+        "options": {}
+      },
+      "id": "a0-create-brief",
+      "name": "Create Brief",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.notion.com/v1/pages/{{ $('Clean template blocks').first().json.projectId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  properties: {\n    'Proposal Brief': { relation: [{ id: $json.id }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "a0-link-brief",
+      "name": "Stamp Brief on Project",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: 'data_source_id', data_source_id: '04d7aa20-eb8d-4d51-b302-25fb4eaaf26e' },\n  properties: {\n    'Log Entry': { title: [{ type: 'text', text: { content: 'A0 · Created Brief for ' + $('Clean template blocks').first().json.projectName } }] },\n    Job: { select: { name: 'A0' } },\n    Outcome: { select: { name: 'Success' } },\n    Timestamp: { date: { start: new Date().toISOString() } },\n    Project: { relation: [{ id: $('Clean template blocks').first().json.projectId }] },\n    Brief: { relation: [{ id: $('Create Brief').first().json.id }] },\n    Details: { rich_text: [{ type: 'text', text: { content: 'Brief URL: ' + $('Create Brief').first().json.url } }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "a0-log",
+      "name": "Log to Automation Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, 300]
+    }
+  ],
+  "connections": {
+    "Notion: new Project": {
+      "main": [[{ "node": "Gate: no Brief AND active status", "type": "main", "index": 0 }]]
+    },
+    "Gate: no Brief AND active status": {
+      "main": [[{ "node": "Fetch Brief template blocks", "type": "main", "index": 0 }]]
+    },
+    "Fetch Brief template blocks": {
+      "main": [[{ "node": "Clean template blocks", "type": "main", "index": 0 }]]
+    },
+    "Clean template blocks": {
+      "main": [[{ "node": "Create Brief", "type": "main", "index": 0 }]]
+    },
+    "Create Brief": {
+      "main": [[{ "node": "Stamp Brief on Project", "type": "main", "index": 0 }]]
+    },
+    "Stamp Brief on Project": {
+      "main": [[{ "node": "Log to Automation Log", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "",
+  "tags": [
+    { "name": "ks-automation" },
+    { "name": "v2.1.2" }
+  ]
+}

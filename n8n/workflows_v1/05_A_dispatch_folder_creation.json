@@ -1,0 +1,165 @@
+{
+  "name": "KS A — Dispatch OneDrive folder creation (calls PC)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "triggerMode": "pagedUpdatedInDatabase",
+        "databaseId": {
+          "__rl": true,
+          "value": "262b73dc-460e-8137-b3bb-000b62103b15",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "a-trigger",
+      "name": "Notion: Project updated",
+      "type": "n8n-nodes-base.notionTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "credentials": { "notionApi": { "name": "KS Notion" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.properties.Folder.checkbox }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
+            },
+            {
+              "leftValue": "={{ (($json.properties.City.rich_text[0] || {}).plain_text || '').trim().length > 0 }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            },
+            {
+              "leftValue": "={{ (($json.properties.State.rich_text[0] || {}).plain_text || '').trim().length > 0 }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            },
+            {
+              "leftValue": "={{ $json.properties.ENGINEER.people.length > 0 }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            },
+            {
+              "leftValue": "={{ $json.properties.Admin.people.length > 0 }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a-gate",
+      "name": "Gate: v2.1.2 Job A",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 300],
+      "notes": "Folder=false AND City/State populated AND ENGINEER AND Admin populated. Client is NOT gating in v2.1.2."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.KS_WEBHOOK_BASE_URL }}/create-folder",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-KS-Token", "value": "={{ $env.KS_WEBHOOK_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ project_id: $json.id }) }}",
+        "options": {
+          "response": { "response": { "neverError": true } }
+        }
+      },
+      "id": "a-dispatch",
+      "name": "POST /create-folder to PC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "notes": "Set KS_WEBHOOK_BASE_URL and KS_WEBHOOK_TOKEN as n8n environment variables. If the PC is on the same LAN as n8n, KS_WEBHOOK_BASE_URL can be http://<pc-ip>:8787. If n8n is cloud-hosted, use a Cloudflare Tunnel / ngrok URL."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a-success-check",
+      "name": "Dispatch succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Notion-Version", "value": "2025-09-03" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: 'data_source_id', data_source_id: '04d7aa20-eb8d-4d51-b302-25fb4eaaf26e' },\n  properties: {\n    'Log Entry': { title: [{ type: 'text', text: { content: 'A · Folder created for ' + (($('Notion: Project updated').first().json.properties['Project Name'].title[0] || {}).plain_text || '') + ' (via n8n)' } }] },\n    Job: { select: { name: 'A' } },\n    Outcome: { select: { name: 'Success' } },\n    Timestamp: { date: { start: new Date().toISOString() } },\n    Project: { relation: [{ id: $('Notion: Project updated').first().json.id }] },\n    Details: { rich_text: [{ type: 'text', text: { content: 'Path: ' + ($json.path || '') } }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "a-log-ok",
+      "name": "Log success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Notion-Version", "value": "2025-09-03" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: 'data_source_id', data_source_id: '04d7aa20-eb8d-4d51-b302-25fb4eaaf26e' },\n  properties: {\n    'Log Entry': { title: [{ type: 'text', text: { content: 'A · Folder creation failed for ' + (($('Notion: Project updated').first().json.properties['Project Name'].title[0] || {}).plain_text || '') } }] },\n    Job: { select: { name: 'A' } },\n    Outcome: { select: { name: 'Failed' } },\n    Timestamp: { date: { start: new Date().toISOString() } },\n    Project: { relation: [{ id: $('Notion: Project updated').first().json.id }] },\n    Error: { rich_text: [{ type: 'text', text: { content: $json.error || 'dispatch failed' } }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "a-log-fail",
+      "name": "Log failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, 400]
+    }
+  ],
+  "connections": {
+    "Notion: Project updated": { "main": [[{ "node": "Gate: v2.1.2 Job A", "type": "main", "index": 0 }]] },
+    "Gate: v2.1.2 Job A": { "main": [[{ "node": "POST /create-folder to PC", "type": "main", "index": 0 }]] },
+    "POST /create-folder to PC": { "main": [[{ "node": "Dispatch succeeded?", "type": "main", "index": 0 }]] },
+    "Dispatch succeeded?": {
+      "main": [
+        [{ "node": "Log success", "type": "main", "index": 0 }],
+        [{ "node": "Log failure", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "ks-automation" }, { "name": "v2.1.2" }, { "name": "hybrid-pc" }]
+}

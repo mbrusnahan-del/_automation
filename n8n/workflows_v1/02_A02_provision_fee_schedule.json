@@ -1,0 +1,107 @@
+{
+  "name": "KS A02 — Provision Fee Schedule on new Brief",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "triggerMode": "pageAdded",
+        "databaseId": {
+          "__rl": true,
+          "value": "6b64658f-5fb3-4329-b02c-3ac3cb8a0828",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "a02-trigger",
+      "name": "Notion: new Brief",
+      "type": "n8n-nodes-base.notionTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "credentials": { "notionApi": { "name": "KS Notion" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/databases",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Notion-Version", "value": "2025-09-03" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: 'page_id', page_id: $json.id },\n  title: [{ type: 'text', text: { content: '💵 Fee Schedule' } }],\n  is_inline: true,\n  initial_data_source: {\n    properties: {\n      Service: { title: {} },\n      Include: { checkbox: {} },\n      Type: { select: { options: [\n        { name: 'Fixed Fee', color: 'blue' },\n        { name: 'Hourly', color: 'yellow' },\n        { name: 'Not to Exceed', color: 'green' }\n      ]}},\n      Amount: { number: { format: 'dollar' } },\n      Order: { number: { format: 'number' } }\n    }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "a02-create-db",
+      "name": "Create Fee Schedule child DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300],
+      "notes": "Uses initial_data_source.properties — the 2025-09-03 API shape. Top-level properties would silently create an empty DB."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the data_source_id from the DB-create response.\n// For single-source inline DBs this is what pages.create() inside the\n// Fee Schedule needs as parent — not the database_id.\nconst db = $input.first().json;\nconst ds = (db.data_sources && db.data_sources[0] && db.data_sources[0].id) || db.id;\nconst briefId = $('Notion: new Brief').first().json.id;\nconst briefName = (($('Notion: new Brief').first().json.properties.Name.title[0] || {}).plain_text) || '';\n\nconst seeds = [\n  { service: 'Schematic Design',              order: 1 },\n  { service: 'Design Development',            order: 2 },\n  { service: 'Construction Documents',        order: 3 },\n  { service: 'Construction Administration',   order: 4 },\n  { service: 'Special Structural Inspections',order: 5 },\n  { service: 'Engineering Site Visits',       order: 6 },\n];\n\nreturn seeds.map(s => ({\n  json: Object.assign({ ds_id: ds, brief_id: briefId, brief_name: briefName }, s),\n}));"
+      },
+      "id": "a02-fanout-seeds",
+      "name": "Fan out 6 seed rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Notion-Version", "value": "2025-09-03" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: 'data_source_id', data_source_id: $json.ds_id },\n  properties: {\n    Service: { title: [{ type: 'text', text: { content: $json.service } }] },\n    Include: { checkbox: true },\n    Order: { number: $json.order }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "a02-seed-row",
+      "name": "Create seed row",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Notion-Version", "value": "2025-09-03" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: 'data_source_id', data_source_id: '04d7aa20-eb8d-4d51-b302-25fb4eaaf26e' },\n  properties: {\n    'Log Entry': { title: [{ type: 'text', text: { content: 'A02 · Provisioned Fee Schedule for ' + $('Fan out 6 seed rows').first().json.brief_name } }] },\n    Job: { select: { name: 'A02' } },\n    Outcome: { select: { name: 'Success' } },\n    Timestamp: { date: { start: new Date().toISOString() } },\n    Brief: { relation: [{ id: $('Fan out 6 seed rows').first().json.brief_id }] },\n    Details: { rich_text: [{ type: 'text', text: { content: 'Seeded 6 rows; ds_id: ' + $('Fan out 6 seed rows').first().json.ds_id } }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "a02-log",
+      "name": "Log to Automation Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, 300],
+      "notes": "Single log row per Brief, not per seed. Relies on n8n's default behavior of running this after all seed rows complete."
+    }
+  ],
+  "connections": {
+    "Notion: new Brief": { "main": [[{ "node": "Create Fee Schedule child DB", "type": "main", "index": 0 }]] },
+    "Create Fee Schedule child DB": { "main": [[{ "node": "Fan out 6 seed rows", "type": "main", "index": 0 }]] },
+    "Fan out 6 seed rows": { "main": [[{ "node": "Create seed row", "type": "main", "index": 0 }]] },
+    "Create seed row": { "main": [[{ "node": "Log to Automation Log", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "ks-automation" }, { "name": "v2.1.2" }]
+}

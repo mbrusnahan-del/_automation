@@ -1,0 +1,228 @@
+{
+  "name": "Kingdom Structural — Notion Project Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kingdom-notion-project",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "0a111111-1111-4111-8111-111111111111",
+      "name": "Notion Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "kingdom-notion-project"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "page_id",
+              "value": "={{ $json.body?.data?.id || $json.body?.id || $json.body?.page?.id || $json.query?.page_id || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "source",
+              "value": "={{ $json.body?.source?.type || 'manual' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0a222222-2222-4222-8222-222222222222",
+      "name": "Extract Page ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-page-id",
+              "leftValue": "={{ $json.page_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0a333333-3333-4333-8333-333333333333",
+      "name": "Has Page ID?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.RENDER_SERVICE_URL || 'https://REPLACE-ME-render-service.run.app' }}/process",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ page_id: $json.page_id, source: $json.source }) }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json",
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "id": "0a444444-4444-4444-8444-444444444444",
+      "name": "Call Render Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_RENDER_SERVICE_CREDENTIAL_ID",
+          "name": "Render Service Shared Secret"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, page_id: $('Extract Page ID').item.json.page_id, service_result: $json }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "0a555555-5555-4555-8555-555555555555",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1140,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'missing page_id in webhook payload', received: $('Notion Webhook').item.json.body || {} }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "0a666666-6666-4666-8666-666666666666",
+      "name": "Respond Missing Page ID",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        440
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Notion Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Page ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Page ID": {
+      "main": [
+        [
+          {
+            "node": "Has Page ID?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Page ID?": {
+      "main": [
+        [
+          {
+            "node": "Call Render Service",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Missing Page ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Render Service": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "kingdom-notion-project-automation",
+  "tags": []
+}

@@ -1,0 +1,100 @@
+{
+  "name": "KS C — Engineer Notified on Folder Created",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "triggerMode": "pagedUpdatedInDatabase",
+        "databaseId": {
+          "__rl": true,
+          "value": "262b73dc-460e-8137-b3bb-000b62103b15",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "c-trigger",
+      "name": "Notion: Project updated",
+      "type": "n8n-nodes-base.notionTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "credentials": { "notionApi": { "name": "KS Notion" } },
+      "notes": "Fires on any Project update. Gate below filters to the specific state change we care about."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.properties.Folder.checkbox }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            },
+            {
+              "leftValue": "={{ $json.properties['Engineer Notified'].checkbox }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c-gate",
+      "name": "Gate: Folder=true AND Engineer Notified=false",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Notion-Version", "value": "2025-09-03" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  properties: {\n    'Engineer Notified': { checkbox: true }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "c-flip",
+      "name": "Flip Engineer Notified = true",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "notes": "This is the ONLY state change n8n makes — the Notion-side automation you wired up picks up the flag flip and sends the actual engineer notification."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Notion-Version", "value": "2025-09-03" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: 'data_source_id', data_source_id: '04d7aa20-eb8d-4d51-b302-25fb4eaaf26e' },\n  properties: {\n    'Log Entry': { title: [{ type: 'text', text: { content: 'C · Engineer notified for ' + (($('Notion: Project updated').first().json.properties['Project Name'].title[0] || {}).plain_text || '') } }] },\n    Job: { select: { name: 'C' } },\n    Outcome: { select: { name: 'Success' } },\n    Timestamp: { date: { start: new Date().toISOString() } },\n    Project: { relation: [{ id: $('Notion: Project updated').first().json.id }] },\n    Details: { rich_text: [{ type: 'text', text: { content: 'Flag flipped; Notion automation handles the notification itself.' } }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "c-log",
+      "name": "Log to Automation Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "Notion: Project updated": { "main": [[{ "node": "Gate: Folder=true AND Engineer Notified=false", "type": "main", "index": 0 }]] },
+    "Gate: Folder=true AND Engineer Notified=false": { "main": [[{ "node": "Flip Engineer Notified = true", "type": "main", "index": 0 }]] },
+    "Flip Engineer Notified = true": { "main": [[{ "node": "Log to Automation Log", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "ks-automation" }, { "name": "v2.1.2" }]
+}
