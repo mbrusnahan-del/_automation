@@ -8,6 +8,7 @@
 *.log
 client_sync_state.json
 excel_sync_state.json
+jobs_sync_state.json
 
 # Pending / queued email artifacts written by KS_EMAIL_MODE=stub
 _pending_email/

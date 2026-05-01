@@ -1363,7 +1363,12 @@ def _fetch_fee_lines(brief_id: str) -> list[dict]:
 
 def _resolve_brief_overlay_dict(brief_page: dict) -> dict:
     """Extract the proposal-only fields from a Brief page to overlay on the
-    Project dict in render_from_notion.merge_brief_into_project()."""
+    Project dict in render_from_notion.merge_brief_into_project().
+
+    v2.1.8: 'Project Street' on the merged dict now sources from the Brief's
+    'Project Address' property. The renderer still reads project.get(
+    'Project Street') downstream — the rename only happens in the Notion
+    schema, not in the renderer's vocabulary."""
     bp = brief_page["properties"]
     return {
         "City":            text_val(bp, config.BriefProp.CITY),
@@ -1371,6 +1376,9 @@ def _resolve_brief_overlay_dict(brief_page: dict) -> dict:
         "Jurisdiction":    text_val(bp, config.BriefProp.JURISDICTION),
         "ICC Code Year":   select_val(bp, config.BriefProp.ICC_CODE_YEAR) or "",
         "Project Type":    select_val(bp, config.BriefProp.PROJECT_TYPE) or "",
+        # v2.1.8: address now sourced from Brief.Project Address, not
+        # Project.Project Street. Brief is canonical for proposal context.
+        "Project Street":  text_val(bp, config.BriefProp.PROJECT_ADDRESS),
     }
 
 
@@ -1448,12 +1456,20 @@ def job_b(dry: bool) -> JobResult:
                     title=f"B · Contract rendered for {brief_name}",
                     project_id=project_rel[0], brief_id=brief_id,
                     details=f"Contract: {contract_path}")
-        except (NotionError, RuntimeError, ValueError, OSError) as e:
+        except Exception as e:
+            # v2.1.8: catch ALL exceptions, not just the previously-listed
+            # subset. A bug in the render pipeline (e.g., a NameError in a
+            # helper) used to bypass this handler, which meant the Brief
+            # stayed Status=Approved + Rendered At=empty AND the Automation
+            # Log got no failure row. The next sweep would re-fire B, the
+            # render would fail again, leaving versioned-but-blank contract
+            # files accumulating in OneDrive. Catch broadly so failures are
+            # always logged and the loop continues to the next Brief.
             r.failed += 1
-            r.errors.append(str(e))
+            r.errors.append(f"{type(e).__name__}: {e}")
             log_row("B", "Failed",
                     title=f"B · Contract render failed for {brief_name}",
-                    brief_id=brief_id, error=str(e))
+                    brief_id=brief_id, error=f"{type(e).__name__}: {e}")
     return r
 
 

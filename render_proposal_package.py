@@ -35,6 +35,7 @@ from render_from_notion import (
     apply_reimbursables_treatment,   # v1 (legacy template) — kept for fallback
     cleanup_whitespace_artifacts,
     clear_highlight_on_resolved_runs,  # v2.1.2: strip highlight on resolved fields
+    linkify_emails,                    # v2.1.8: auto-hyperlink email addresses
     resolve_scope_bullets,
     merge_brief_into_project,
     # v2 template pipeline (2026-04-22)
@@ -258,6 +259,23 @@ def render_contract(project_data, client_data, contact_data, contracts_dir,
     filename = sanitize(filename)
     out_path = os.path.join(contracts_dir, filename)
 
+    # v2.1.8: never overwrite a previously rendered contract. If a file with
+    # the same base name already exists in the Contracts folder, append the
+    # lowest unused 'v{N}' suffix (v2, v3, v4 ...). The first render keeps
+    # the un-suffixed name; re-renders accumulate as separate files so the
+    # engineer can compare versions and nothing is destroyed or lost.
+    if os.path.exists(out_path):
+        base, ext = os.path.splitext(filename)
+        v = 2
+        while True:
+            candidate_name = f"{base} v{v}{ext}"
+            candidate_path = os.path.join(contracts_dir, candidate_name)
+            if not os.path.exists(candidate_path):
+                filename = candidate_name
+                out_path = candidate_path
+                break
+            v += 1
+
     # Retry the template copy when the destination is locked. Causes we've
     # actually seen: (a) Word has the previous render open with an exclusive
     # lock, (b) OneDrive sync handler is mid-write to that path, (c) the
@@ -279,56 +297,107 @@ def render_contract(project_data, client_data, contact_data, contracts_dir,
             f"Most common cause: the file is open in Word — close it and re-run. "
             f"Last OS error: {last_err}"
         )
-    doc = Document(out_path)
 
-    # Parse Brief body for body-driven content. Safe when brief_body=None
-    # (returns empty lists; renderer falls back gracefully).
-    parsed = parse_brief_body(brief_body or "")
+    # v2.1.8: tracking flag for partial-render cleanup. If anything between
+    # the template copy and doc.save() raises, the file at out_path is just
+    # a pure (un-rendered) template copy — delete it so OneDrive doesn't
+    # accumulate empty 'v2/v3/v4...' contracts. Exception is re-raised so
+    # Job B logs and surfaces it.
+    save_succeeded = False
+    try:
+        doc = Document(out_path)
 
-    # 1. Reimbursables variant — body checkbox wins; Project.Reimbursables
-    #    Treatment is legacy fallback.
-    treatment = parsed.get("reimbursables") or project_data.get("Reimbursables Treatment")
-    apply_reimbursables_v2(doc, treatment or "Standard")
+        # Parse Brief body for body-driven content. Safe when brief_body=None
+        # (returns empty lists; renderer falls back gracefully).
+        parsed = parse_brief_body(brief_body or "")
 
-    # 2. SSI paragraph — include by default. Body-checkbox "Special structural
-    #    inspections shall be excluded" suppresses it. The scope bullet itself
-    #    still appears (separate from the SSI billing paragraph).
-    ssi_excluded = any(
-        "special structural inspections shall be excluded" in i.get("text", "").lower()
-        for i in parsed.get("scope_of_services", [])
-    )
-    handle_ssi_paragraph(doc, include=not ssi_excluded)
+        # 1. Reimbursables variant — body checkbox wins; Project.Reimbursables
+        #    Treatment is legacy fallback.
+        treatment = parsed.get("reimbursables") or project_data.get("Reimbursables Treatment")
+        apply_reimbursables_v2(doc, treatment or "Standard")
 
-    # 3. Scope of Services bullets from Brief body (preferred) or fallback.
-    scope_items = parsed.get("scope_of_services") or []
-    if scope_items:
-        bullets = [i["text"] for i in scope_items]
-    else:
-        bullets = resolve_scope_bullets(project_data)
-    expand_scope_bullets(doc, bullets)
+        # 2. SSI paragraph — v2.1.8: include ONLY when the Fee Schedule's
+        #    'Special Structural Inspections' row is checked Include. With the
+        #    v2.1.7 formula, that checkbox auto-derives from Amount > 0, so
+        #    the rule simplifies to: SSI paragraph appears iff the engineer
+        #    entered a non-zero SSI fee on the Brief's Fee Schedule. If
+        #    unchecked (no fee), the paragraph is removed from the contract.
+        ssi_included = any(
+            (fl.get("service") or "").strip().lower() == "special structural inspections"
+            and fl.get("include")
+            for fl in (fee_lines or [])
+        )
+        handle_ssi_paragraph(doc, include=ssi_included)
 
-    # 4. Fee Schedule — remove unchecked rows, format included rows, sum total.
-    if fee_lines:
-        render_fee_schedule(doc, fee_lines)
+        # 3. Scope of Services bullets from Brief body (preferred) or fallback.
+        scope_items = parsed.get("scope_of_services") or []
+        if scope_items:
+            bullets = [i["text"] for i in scope_items]
+        else:
+            bullets = resolve_scope_bullets(project_data)
+        # v2.1.8: every contract closes the scope list with a hard exclusion
+        # statement so the bounds of the engagement are explicit. Always
+        # appended as the LAST bullet, regardless of source. Idempotent — if
+        # an engineer happens to type this same line into the Brief, we
+        # de-dupe so it doesn't appear twice.
+        STATIC_EXCLUSION_BULLET = "Tasks not listed in this scope of work are excluded."
+        bullets = [b for b in bullets if b.strip().rstrip(".").lower()
+                   != STATIC_EXCLUSION_BULLET.rstrip(".").lower()]
+        bullets.append(STATIC_EXCLUSION_BULLET)
+        expand_scope_bullets(doc, bullets)
 
-    # 5. Basic Services paragraph — comma-join checked items.
-    basic_para = build_basic_services_paragraph(parsed)
-    handle_basic_services_paragraph(doc, basic_para)
+        # 4. Fee Schedule — remove unchecked rows, format included rows, sum total.
+        #    v2.1.8: when Reimbursables treatment is 'Digital Only' or
+        #    'Included in Fee', the 'Reimbursables' row gets removed from
+        #    the fee table and the '+ Reimbursables' suffix is dropped from
+        #    the TOTAL row. Standard treatment keeps both.
+        include_reimbursables = (treatment or "Standard").strip().lower() == "standard"
+        if fee_lines:
+            render_fee_schedule(doc, fee_lines,
+                                include_reimbursables=include_reimbursables)
 
-    # 6. Simple placeholder substitution (must be last so runs are stable
-    #    after any prior manipulations).
-    fill_placeholders(doc, merge)
+        # 5. Basic Services paragraph — comma-join checked items.
+        basic_para = build_basic_services_paragraph(parsed)
+        handle_basic_services_paragraph(doc, basic_para)
 
-    # 7. Cleanup stray whitespace around punctuation.
-    cleanup_whitespace_artifacts(doc)
+        # 6. Simple placeholder substitution (must be last so runs are stable
+        #    after any prior manipulations).
+        fill_placeholders(doc, merge)
 
-    # 8. Clear highlighting on every run that holds a resolved value. Leave
-    #    highlight intact on any run whose text still contains '<<FILL IN:'
-    #    so engineers visually spot the data gaps before sending the contract.
-    #    (v2.1.2 spec)
-    clear_highlight_on_resolved_runs(doc)
+        # 7. Cleanup stray whitespace around punctuation.
+        cleanup_whitespace_artifacts(doc)
 
-    doc.save(out_path)
+        # 8. Clear highlighting on every run that holds a resolved value.
+        #    Leave highlight intact on any run whose text still contains
+        #    '<<FILL IN:' so engineers visually spot the data gaps before
+        #    sending the contract. (v2.1.2 spec)
+        clear_highlight_on_resolved_runs(doc)
+
+        # 9. v2.1.8: convert plain-text email addresses into Word hyperlinks
+        #    (mailto:foo@bar.com), styled blue + underlined. Wrapped in its
+        #    own try/except so a bug in the linkifier degrades gracefully —
+        #    the contract still saves with everything else applied; emails
+        #    just appear as plain text on that one render.
+        try:
+            linkify_emails(doc)
+        except Exception as _linkify_err:
+            import logging as _lg
+            _lg.getLogger("render").warning(
+                "linkify_emails failed (non-fatal): %s: %s — emails on "
+                "this contract will render as plain text.",
+                type(_linkify_err).__name__, _linkify_err,
+            )
+
+        doc.save(out_path)
+        save_succeeded = True
+    finally:
+        if not save_succeeded:
+            try:
+                if os.path.exists(out_path):
+                    os.remove(out_path)
+            except OSError:
+                pass
+
     return out_path, merge
 
 

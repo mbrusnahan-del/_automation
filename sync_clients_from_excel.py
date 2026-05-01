@@ -167,7 +167,7 @@ _PHONE_RE = re.compile(r'(?<!\d)(\(?\d{3}\)?[.\-\s]?\d{3}[.\-\s]?\d{4})(?!\d)')
 
 @dataclass
 class ParsedContact:
-    name: str
+    name: str = ""
     email: str = ""
     phone: str = ""
 

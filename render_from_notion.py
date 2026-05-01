@@ -641,6 +641,14 @@ def cleanup_whitespace_artifacts(doc):
     After template edits (like removing instructional text runs), stray
     whitespace can end up adjacent to punctuation: "work ." / "intervals ." /
     "email ..". Clean these by walking every paragraph's joined text.
+
+    v2.1.8: also strips leading whitespace from the first non-empty run of
+    each paragraph. The contract template has a literal space before the
+    {{date}} placeholder in the top-left header (' {{date}}'), which after
+    substitution would render as ' April 30, 2026'. Stripping the leading
+    space on first runs fixes that — and is generally safe because Word
+    paragraph indentation is normally driven by paragraph styles, not
+    leading whitespace inside a run.
     """
     import re as _re
     patterns = [
@@ -664,14 +672,154 @@ def cleanup_whitespace_artifacts(doc):
             if r.text:
                 for pat, repl in patterns:
                     r.text = pat.sub(repl, r.text)
+        # v2.1.8: strip leading whitespace from the first non-empty run.
+        # Find the first run with any non-whitespace content; if that run's
+        # text starts with whitespace, lstrip just that portion.
+        for r in runs:
+            if r.text and r.text.strip():
+                if r.text != r.text.lstrip():
+                    r.text = r.text.lstrip()
+                break  # only the first non-empty run
 
     for p in doc.paragraphs:
         clean_paragraph(p)
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Email → hyperlink conversion (v2.1.8)
+# ────────────────────────────────────────────────────────────────────────
+
+_EMAIL_PATTERN = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')
+
+
+def linkify_emails(doc):
+    """Walk every paragraph + table cell and convert plain-text email
+    addresses into proper Word hyperlinks ('mailto:foo@bar.com'), styled
+    blue + underlined (Word's default Hyperlink color #0563C1).
+
+    Idempotent: emails already wrapped in <w:hyperlink> are skipped, so
+    re-runs on a partially-linkified doc don't double-wrap. Safe to run
+    multiple times.
+
+    Why this is needed: the template has placeholders like
+    '{{client_email}}' in plain text runs. After fill_placeholders does
+    text substitution, those runs contain a bare email string with no
+    color, no underline, no hyperlink. Word normally auto-converts emails
+    to hyperlinks only when you type a space/Enter after them — which
+    never happens during programmatic substitution. This function
+    performs that conversion explicitly after the substitution pass.
+    """
+    from docx.oxml.shared import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.opc.constants import RELATIONSHIP_TYPE
+    from copy import deepcopy
+
+    def _make_hyperlink_element(part, email, source_rPr=None):
+        """Build a <w:hyperlink> element wrapping a styled <w:r> for the
+        given email address. If a source run-properties element is given,
+        copy its formatting (font, size, etc.) and add color+underline on
+        top — so the email inherits the surrounding paragraph's font."""
+        r_id = part.relate_to(
+            f"mailto:{email}", RELATIONSHIP_TYPE.HYPERLINK, is_external=True
+        )
+        hyperlink = OxmlElement('w:hyperlink')
+        hyperlink.set(qn('r:id'), r_id)
+
+        new_run = OxmlElement('w:r')
+        rPr = deepcopy(source_rPr) if source_rPr is not None else OxmlElement('w:rPr')
+
+        # Strip any existing color/underline so our values win
+        for tag in ('w:color', 'w:u'):
+            existing = rPr.find(qn(tag))
+            if existing is not None:
+                rPr.remove(existing)
+
+        color = OxmlElement('w:color')
+        color.set(qn('w:val'), '0563C1')   # Word's default Hyperlink color
+        rPr.append(color)
+        u = OxmlElement('w:u')
+        u.set(qn('w:val'), 'single')
+        rPr.append(u)
+        new_run.append(rPr)
+
+        t = OxmlElement('w:t')
+        t.text = email
+        t.set(qn('xml:space'), 'preserve')
+        new_run.append(t)
+
+        hyperlink.append(new_run)
+        return hyperlink
+
+    def _append_text_with_breaks(parent, text):
+        """Append <w:t> and <w:br/> children to `parent` (a <w:r> element),
+        translating any '\\n' in text into proper <w:br/> elements rather
+        than literal newline characters. Word ignores '\\n' inside <w:t>
+        but renders <w:br/> as a soft line break — without this conversion,
+        line-separated placeholders like '{{client_email}}\\n{{client_phone}}'
+        end up smashed onto one line after substitution + linkify."""
+        if not text:
+            return
+        parts = text.split('\n')
+        for i, part in enumerate(parts):
+            if i > 0:
+                parent.append(OxmlElement('w:br'))
+            if part:
+                t = OxmlElement('w:t')
+                t.text = part
+                t.set(qn('xml:space'), 'preserve')
+                parent.append(t)
+
+    def _process_paragraph(paragraph):
+        # Iterate a snapshot — we'll be mutating the paragraph's children
+        for run in list(paragraph.runs):
+            # Skip runs already inside a hyperlink — they're already linked
+            if run._element.getparent().tag == qn('w:hyperlink'):
+                continue
+            text = run.text or ""
+            m = _EMAIL_PATTERN.search(text)
+            if not m:
+                continue
+            email = m.group(0)
+            before = text[:m.start()]
+            after  = text[m.end():]
+
+            # Capture rPr from the original run before mutating it; we'll
+            # reuse this for the hyperlink's inner run + the tail run so
+            # font/size/etc carry through the split.
+            source_rPr_orig = run._element.find(qn('w:rPr'))
+            source_rPr_for_hl = source_rPr_orig  # _make_hyperlink_element deep-copies it
+            source_rPr_for_tail = deepcopy(source_rPr_orig) if source_rPr_orig is not None else None
+
+            # v2.1.8: instead of `run.text = before` (which collapses the
+            # run to a single <w:t> and destroys any <w:br/> elements that
+            # encoded line breaks), rebuild the original run's children
+            # ourselves so '\n' inside `before` becomes <w:br/>. Keep rPr.
+            for child in list(run._element):
+                if child.tag != qn('w:rPr'):
+                    run._element.remove(child)
+            _append_text_with_breaks(run._element, before)
+
+            part = paragraph.part
+            hyperlink = _make_hyperlink_element(part, email, source_rPr_for_hl)
+            run._element.addnext(hyperlink)
+
+            if after:
+                # Tail text in a fresh run that inherits the original's rPr.
+                # Same '\n' handling so a phone number on the line after the
+                # email stays on its own line.
+                tail_run = OxmlElement('w:r')
+                if source_rPr_for_tail is not None:
+                    tail_run.append(source_rPr_for_tail)
+                _append_text_with_breaks(tail_run, after)
+                hyperlink.addnext(tail_run)
+
+    for p in doc.paragraphs:
+        _process_paragraph(p)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    clean_paragraph(p)
+                    _process_paragraph(p)
 
 
 def apply_reimbursables_treatment(doc, treatment):
@@ -1020,12 +1168,20 @@ def format_fee_cell(fee_line):
     return "Hourly"
 
 
-def render_fee_schedule(doc, fee_lines):
+def render_fee_schedule(doc, fee_lines, *, include_reimbursables=True):
     """
     Fill the FEE SCHEDULE table from fee_lines.
       - Rows whose Service has Include=False are REMOVED from the table.
       - Included rows get 'Words Dollars ($X,XXX.XX)' formatted cell text.
       - TOTAL row sums Fixed-Fee + 'not to exceed' amounts of included rows.
+
+    v2.1.8: `include_reimbursables` is False when the Brief's reimbursables
+    treatment is 'Digital Only' or 'Included in Fee'. In those cases:
+      - The 'Reimbursables' row in the fee schedule table is removed
+        (no row reading 'See REIMBURSABLE EXPENSES section of contract' /
+        'Reimbursables Per REIMBURSABLE EXPENSES section, as needed').
+      - The TOTAL row drops the '+ Reimbursables' suffix.
+    Standard treatment keeps both intact.
     """
     by_service = {fl["service"]: fl for fl in (fee_lines or [])}
 
@@ -1057,6 +1213,13 @@ def render_fee_schedule(doc, fee_lines):
             fee_cell     = row.cells[1]
             service_name = service_cell.text.strip()
 
+            # v2.1.8: drop the Reimbursables row when reimbursables aren't
+            # billed separately (Digital Only / Included in Fee).
+            if (not include_reimbursables
+                    and service_name.lower() == "reimbursables"):
+                rows_to_remove.append(row)
+                continue
+
             if service_name in by_service:
                 fl = by_service[service_name]
                 if not fl.get("include"):
@@ -1072,10 +1235,12 @@ def render_fee_schedule(doc, fee_lines):
                     ftype = (fl.get("type") or "").lower()
                     if ftype == "fixed fee" or "not to exceed" in ftype:
                         total += amt
+                # v2.1.8: '+ Reimbursables' suffix is conditional.
+                tail = " + Reimbursables" if include_reimbursables else ""
                 if total > 0:
-                    new_text = f"{dollars_to_words(total)} (${total:,.2f}) + Reimbursables"
+                    new_text = f"{dollars_to_words(total)} (${total:,.2f}){tail}"
                 else:
-                    new_text = "TBD + Reimbursables"
+                    new_text = f"TBD{tail}"
                 set_cell_text(fee_cell, new_text)
 
         for row in rows_to_remove:
