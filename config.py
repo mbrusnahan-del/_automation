@@ -38,6 +38,8 @@ class ProjectProp:
     CITY                = "City"
     STATE               = "State"
     PROJECT_STREET      = "Project Street"
+    # Project Type (v2.1.9: moved back onto Projects DB; Brief now rolls it up)
+    PROJECT_TYPE        = "Project Type"
     # Relations
     PROPOSAL_BRIEF      = "Proposal Brief"
     # Automation state
@@ -119,12 +121,58 @@ class LogJob:
     B   = "B"        # Contract render
     C   = "C"        # Engineer notification
     D   = "D"        # Admin notification
+    F   = "F"        # Fee memo PDF (post-folder, internal-only)
 
 
 class LogOutcome:
     SUCCESS = "Success"
     SKIPPED = "Skipped"        # idempotency hit — nothing to do
     FAILED  = "Failed"
+
+
+# ========================================================================
+# Project Type translation: Notion select values → fee_memo internal types
+# ========================================================================
+# fee_memo.py keys its comp database off internal type names that pre-date
+# the current Notion dropdown. This table bridges the two so Job F can
+# look up the right comp set for any Notion-tagged project.
+NOTION_TO_FEE_MEMO_TYPE = {
+    "Residential – Remodel / Addition":     "Residential Remodel",
+    "Residential – Single-Family":          "New Residence",
+    "Residential – Multi‑Family":           "Multifamily",
+    "Religious":                            "Commercial New",
+    "Restaurant":                           "Tenant Improvement",
+    "Storage":                              "Commercial New",
+    "Medical":                              "Commercial New",
+    "Office":                               "Commercial New",
+    "Education":                            "Commercial New",
+    "Commercial – TI":                      "Tenant Improvement",
+    "Industrial":                           "Commercial New",
+    "Canopy":                               "Specialty",
+    "Specialty Structures":                 "Specialty",
+    "Existing Building / Assessment":       "Structural Observation",
+    "PEMB":                                 "PEMB",
+    "Other":                                "Commercial New",
+}
+
+
+# ========================================================================
+# Intake Complete checklist — required fields before ticking the box
+# ========================================================================
+# Surfaced as the Notion property description on Projects.Intake Complete
+# so admins know what to confirm before triggering the cascade. Also used
+# in tooling that wants to show a checklist in the Project page template.
+INTAKE_REQUIRED_FIELDS = [
+    "Project Name (with 8-digit KS job number prefix, e.g. '26124149 …')",
+    "Client (relation to Clients DB)",
+    "Project Contact (relation to Contacts DB — the architect/owner POC)",
+    "ENGINEER (people field — assigned KS engineer)",
+    "Admin (people field — assigned KS admin)",
+    "City and State (text fields)",
+    "Project Street (text field — the actual project address)",
+    "Project Type (select — pick from 16 categories)",
+    "Engineering Status set to 'Proposal Requested'",
+]
 
 
 # ========================================================================

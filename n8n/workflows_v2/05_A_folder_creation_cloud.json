@@ -1,0 +1,329 @@
+{
+  "name": "KS A \u2014 Folder Creation cloud-native (v2.1.8 webhook, Microsoft Graph)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ks-a-folder-creation",
+        "authentication": "none",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "2a93a83d-2e62-46e4-ab49-24bd9c36c68c",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "68f5248f-7252-4011-8358-058972cd07f3"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.body.data.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "options": {}
+      },
+      "id": "41b5344d-339d-4495-8cc6-e62850112d63",
+      "name": "Get Project Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        380,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.properties.Folder.checkbox }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties[\"Intake Complete\"].checkbox }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ ($json.properties.City?.rich_text?.[0]?.plain_text || \"\").length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "leftValue": "={{ ($json.properties.State?.rich_text?.[0]?.plain_text || \"\").length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties.ENGINEER?.people?.length || 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties.Admin?.people?.length || 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          }
+        },
+        "options": {}
+      },
+      "id": "9e40f0de-59c2-4c85-ba1e-7d3391eae36a",
+      "name": "Gate: v2.1.8 Job A",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        580,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://login.microsoftonline.com/{{ $env.KS_AZURE_TENANT_ID }}/oauth2/v2.0/token",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "client_id",
+              "value": "={{ $env.KS_AZURE_CLIENT_ID }}"
+            },
+            {
+              "name": "client_secret",
+              "value": "={{ $env.KS_AZURE_CLIENT_SECRET }}"
+            },
+            {
+              "name": "scope",
+              "value": "https://graph.microsoft.com/.default"
+            },
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e423a1af-9e72-407a-a131-8d0eb0ad6504",
+      "name": "Get Graph Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const project = $(\"Get Project Page\").item.json;\nconst tokenJson = $(\"Get Graph Token\").item.json;\nconst token = tokenJson.access_token;\nif (!token) throw new Error(\"No access_token from Microsoft OAuth\");\n\nconst DRIVE_ID = $env.KS_GRAPH_DRIVE_ID\n  || \"b!6BuR8AeAzE-i8tkyElJZj4W5gEAFUoFLgaF5LKROL2PkDU4xFZP6Sq_6155-5AYr\";\nconst ROOT_PATH = \"_Projects\";\nconst SUBFOLDERS = [\n  \"Calculations\",\"City Comments\",\"Construction Administration\",\n  \"Contracts\",\"Correspondence\",\"Drafting\",\"Drawings\",\n  \"Geotech Report\",\"Notes\",\"QAQC\",\"Redlines\",\"Sent to Client\",\"Site Visit\",\n];\n\nconst projectName = (project.properties[\"Project Name\"]?.title?.[0]?.plain_text || \"\").trim();\nconst m = projectName.match(/^(\\d{8})\\s+(.+)$/);\nif (!m) throw new Error(\"Project Name lacks 8-digit number prefix: \" + JSON.stringify(projectName));\nconst number = m[1];\nconst shortName = m[2].trim();\nconst year = \"20\" + number.substring(0, 2);\n\nconst city = (project.properties.City?.rich_text?.[0]?.plain_text || \"\").trim();\nconst state = (project.properties.State?.rich_text?.[0]?.plain_text || \"\").trim();\nif (!city || !state) throw new Error(\"City and State must both be populated\");\n\nconst folderName = number + \" \" + shortName + \" - \" + city + \", \" + state;\nconst yearPath = ROOT_PATH + \"/\" + year;\nconst projectPath = yearPath + \"/\" + folderName;\n\nasync function createFolder(parentPath, name) {\n  const url = \"https://graph.microsoft.com/v1.0/drives/\" + DRIVE_ID\n            + \"/root:/\" + encodeURI(parentPath) + \":/children\";\n  const resp = await fetch(url, {\n    method: \"POST\",\n    headers: { \"Authorization\": \"Bearer \" + token, \"Content-Type\": \"application/json\" },\n    body: JSON.stringify({\n      name: name, folder: {},\n      \"@microsoft.graph.conflictBehavior\": \"fail\",\n    }),\n  });\n  if (resp.status === 201) return await resp.json();\n  if (resp.status === 409) {\n    const itemPath = parentPath + \"/\" + name;\n    const getUrl = \"https://graph.microsoft.com/v1.0/drives/\" + DRIVE_ID\n                 + \"/root:/\" + encodeURI(itemPath);\n    const getResp = await fetch(getUrl, { headers: { \"Authorization\": \"Bearer \" + token } });\n    if (!getResp.ok) throw new Error(\"Conflict but GET failed (\" + getResp.status + \") for \" + itemPath);\n    return await getResp.json();\n  }\n  const text = await resp.text();\n  throw new Error(\"Folder create \" + resp.status + \" for \" + parentPath + \"/\" + name + \": \" + text);\n}\n\nawait createFolder(ROOT_PATH, year);\nconst projectFolder = await createFolder(yearPath, folderName);\nfor (const sub of SUBFOLDERS) {\n  await createFolder(projectPath, sub);\n}\n\nreturn [{ json: {\n  projectId: project.id,\n  projectName: projectName,\n  folderName: folderName,\n  webUrl: projectFolder.webUrl,\n  year: year,\n} }];"
+      },
+      "id": "4ad17223-c47a-4ba6-b966-73f31fc95a65",
+      "name": "Create folder tree",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        980,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.projectId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  properties: {\n    \"Folder\": { checkbox: true },\n    \"SharePoint Folder\": { url: $json.webUrl },\n    \"Status\": { select: { name: \"Proposal Brief Pending\" } }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "d2030458-2b4f-4386-af9b-c48e6bf9a931",
+      "name": "Update Notion Project",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1180,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"A \u00b7 Folder created (cloud) for \" + ($(\"Create folder tree\").item.json.folderName || \"Project\") } }] },\n    \"Job\": { select: { name: \"A\" } },\n    \"Outcome\": { select: { name: \"Success\" } },\n    \"Project\": { relation: [{ id: $(\"Create folder tree\").item.json.projectId }] },\n    \"Details\": { rich_text: [{ type: \"text\", text: { content: $(\"Create folder tree\").item.json.webUrl || \"\" } }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "4d33d81a-c521-4a9b-9da6-2392c31e0381",
+      "name": "Log to Automation Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1380,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Project Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Project Page": {
+      "main": [
+        [
+          {
+            "node": "Gate: v2.1.8 Job A",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate: v2.1.8 Job A": {
+      "main": [
+        [
+          {
+            "node": "Get Graph Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Graph Token": {
+      "main": [
+        [
+          {
+            "node": "Create folder tree",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create folder tree": {
+      "main": [
+        [
+          {
+            "node": "Update Notion Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Notion Project": {
+      "main": [
+        [
+          {
+            "node": "Log to Automation Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "aceb10ac-13ec-497f-8cdf-1a4e181ab119",
+  "tags": [
+    {
+      "name": "ks-automation"
+    },
+    {
+      "name": "v2.1.8"
+    },
+    {
+      "name": "webhook"
+    },
+    {
+      "name": "cloud-native"
+    }
+  ]
+}

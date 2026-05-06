@@ -1,0 +1,222 @@
+{
+  "name": "KS C \u2014 Engineer Notified on Folder Created (v2.1.8 webhook)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ks-c-engineer-notified",
+        "authentication": "none",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "d7e055e4-eea2-4c93-9321-c55c14b4c2dd",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "cfd88090-7a20-423e-9a6f-cf41298a2621"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.body.data.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "options": {}
+      },
+      "id": "1ae3f22c-0548-48ea-afa9-0c6016a9a2c3",
+      "name": "Get Project Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.properties.Folder.checkbox }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties[\"Engineer Notified\"].checkbox }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          }
+        },
+        "options": {}
+      },
+      "id": "727bbad0-771a-490a-b6fd-fed5b3af1156",
+      "name": "Gate: Folder=true AND Engineer Notified=false",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.notion.com/v1/pages/{{ $(\"Get Project Page\").item.json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ properties: { \"Engineer Notified\": { checkbox: true } } }) }}",
+        "options": {}
+      },
+      "id": "140464e3-07ed-4afd-ac4f-7cc262d5c3a5",
+      "name": "Flip Engineer Notified = true",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"C \u00b7 Engineer notified for \" + ($(\"Get Project Page\").item.json.properties[\"Project Name\"].title[0]?.plain_text || \"Project\") } }] },\n    \"Job\": { select: { name: \"C\" } },\n    \"Outcome\": { select: { name: \"Success\" } },\n    \"Project\": { relation: [{ id: $(\"Get Project Page\").item.json.id }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "f7f73f26-39ad-423e-8972-a6e31054e92f",
+      "name": "Log to Automation Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Project Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Project Page": {
+      "main": [
+        [
+          {
+            "node": "Gate: Folder=true AND Engineer Notified=false",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate: Folder=true AND Engineer Notified=false": {
+      "main": [
+        [
+          {
+            "node": "Flip Engineer Notified = true",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flip Engineer Notified = true": {
+      "main": [
+        [
+          {
+            "node": "Log to Automation Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "8baff8ec-f2bc-47cf-b363-bd838c9c2c37",
+  "tags": [
+    {
+      "name": "ks-automation"
+    },
+    {
+      "name": "v2.1.8"
+    },
+    {
+      "name": "webhook"
+    }
+  ]
+}

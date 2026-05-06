@@ -1,0 +1,358 @@
+{
+  "name": "KS A0 \u2014 Create Proposal Brief on new Project (v2.1.8 webhook)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ks-a0-create-brief",
+        "authentication": "none",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "ce6d4f18-c7b1-40bf-b324-8e31a6b3b1dc",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "0d3e0dc4-1d11-4490-9211-475d27bcbf1f"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.body.data.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "options": {}
+      },
+      "id": "ebc03308-69c5-4eee-a678-ca50cda54e06",
+      "name": "Get Project Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.properties[\"Proposal Brief\"].relation }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "array",
+                "operation": "lengthEquals",
+                "rightType": "number"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties[\"Engineering Status\"].status?.name || \"\" }}",
+              "rightValue": "Dead",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties[\"Engineering Status\"].status?.name || \"\" }}",
+              "rightValue": "IGNNROE FO RNOW",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties[\"Engineering Status\"].status?.name || \"\" }}",
+              "rightValue": "On Hold",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties[\"Intake Complete\"].checkbox }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          }
+        },
+        "options": {}
+      },
+      "id": "393a187c-5f0f-4df0-9618-a6573752589d",
+      "name": "Gate: no Brief AND active AND Intake Complete",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.notion.com/v1/blocks/34ab73dc-460e-80bf-b97c-da13d53310e8/children?page_size=100",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "options": {}
+      },
+      "id": "c14a0c04-d5a7-4113-950d-8f08beb951f6",
+      "name": "Fetch Brief template blocks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const incoming = $input.all();\nconst dropFields = new Set([\n  \"id\",\"object\",\"created_time\",\"created_by\",\"last_edited_time\",\"last_edited_by\",\n  \"parent\",\"archived\",\"in_trash\",\"has_children\",\"request_id\",\"developer_survey\",\n]);\nconst supportedTypes = new Set([\n  \"paragraph\",\"heading_1\",\"heading_2\",\"heading_3\",\"bulleted_list_item\",\n  \"numbered_list_item\",\"to_do\",\"toggle\",\"callout\",\"quote\",\"divider\",\"code\",\n]);\nfunction cleanBlock(b) {\n  const out = {};\n  for (const k of Object.keys(b)) {\n    if (dropFields.has(k)) continue;\n    let v = b[k];\n    if (v === null) continue;\n    if (typeof v === \"object\" && !Array.isArray(v)) v = cleanBlock(v);\n    if (Array.isArray(v)) v = v.map(x => (x && typeof x === \"object\" ? cleanBlock(x) : x));\n    out[k] = v;\n  }\n  return out;\n}\nconst allBlocks = [];\nfor (const item of incoming) {\n  const data = item.json;\n  if (data && Array.isArray(data.results)) allBlocks.push(...data.results);\n  else if (Array.isArray(data)) allBlocks.push(...data);\n}\nconst children = allBlocks.filter(b => supportedTypes.has(b.type)).map(cleanBlock);\nconst project = $(\"Get Project Page\").item.json;\nreturn [{ json: { project, children } }];"
+      },
+      "id": "a2707ca9-ee70-4c9a-a2c6-a7e774a2650b",
+      "name": "Clean template blocks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"6b64658f-5fb3-4329-b02c-3ac3cb8a0828\" },\n  properties: {\n    \"Name\": { title: [{ type: \"text\", text: { content: $json.project.properties[\"Project Name\"].title[0]?.plain_text || \"Untitled\" } }] },\n    \"Project\": { relation: [{ id: $json.project.id }] },\n    \"Status\": { select: { name: \"Not Started\" } }\n  },\n  children: $json.children\n}) }}",
+        "options": {}
+      },
+      "id": "ace26467-a230-42b9-98a7-7433e0c9949e",
+      "name": "Create Brief",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.notion.com/v1/pages/{{ $(\"Get Project Page\").item.json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  properties: {\n    \"Proposal Brief\": { relation: [{ id: $json.id }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "a61832e7-5057-42f1-a648-c58301c59668",
+      "name": "Stamp Brief on Project",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"A0 \u00b7 Created Brief for \" + ($(\"Get Project Page\").item.json.properties[\"Project Name\"].title[0]?.plain_text || \"Untitled\") } }] },\n    \"Job\": { select: { name: \"A0\" } },\n    \"Outcome\": { select: { name: \"Success\" } },\n    \"Project\": { relation: [{ id: $(\"Get Project Page\").item.json.id }] },\n    \"Brief\": { relation: [{ id: $(\"Create Brief\").item.json.id }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "1788b46c-ef1f-4427-9eec-e19f62c6ccc2",
+      "name": "Log to Automation Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Project Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Project Page": {
+      "main": [
+        [
+          {
+            "node": "Gate: no Brief AND active AND Intake Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate: no Brief AND active AND Intake Complete": {
+      "main": [
+        [
+          {
+            "node": "Fetch Brief template blocks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Brief template blocks": {
+      "main": [
+        [
+          {
+            "node": "Clean template blocks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean template blocks": {
+      "main": [
+        [
+          {
+            "node": "Create Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Brief": {
+      "main": [
+        [
+          {
+            "node": "Stamp Brief on Project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stamp Brief on Project": {
+      "main": [
+        [
+          {
+            "node": "Log to Automation Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "49bb52ff-8ccd-4736-8455-66ee6cc7d90c",
+  "tags": [
+    {
+      "name": "ks-automation"
+    },
+    {
+      "name": "v2.1.8"
+    },
+    {
+      "name": "webhook"
+    }
+  ]
+}

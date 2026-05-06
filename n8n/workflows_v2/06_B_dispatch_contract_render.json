@@ -1,0 +1,303 @@
+{
+  "name": "KS B \u2014 Dispatch Contract Render (v2.1.8 webhook, calls PC)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ks-b-contract-render",
+        "authentication": "none",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "f8c35c67-e83b-465f-8024-9be7a064be6b",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "7aa7685c-ceba-43c3-87fd-73036c64f14d"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.body.data.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "options": {}
+      },
+      "id": "56e4594e-a6f8-438d-be2d-3243504de877",
+      "name": "Get Brief Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.properties.Status.select?.name || \"\" }}",
+              "rightValue": "Approved",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties[\"Rendered At\"].date }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          }
+        },
+        "options": {}
+      },
+      "id": "1a6081e0-fed5-4bdb-b55c-5aa9b1a06231",
+      "name": "Gate: Status=Approved AND not yet rendered",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.KS_WEBHOOK_BASE_URL }}/render-contract",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-KS-Token",
+              "value": "={{ $env.KS_WEBHOOK_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ brief_id: $json.id }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "870cddf4-b31c-4132-822d-cd94c8647c2f",
+      "name": "POST /render-contract to PC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          }
+        },
+        "options": {}
+      },
+      "id": "a4a6a870-3e95-49d0-a38c-f9f5a42193b2",
+      "name": "Render succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"B \u00b7 Contract rendered\" } }] },\n    \"Job\": { select: { name: \"B\" } },\n    \"Outcome\": { select: { name: \"Success\" } },\n    \"Brief\": { relation: [{ id: $(\"Get Brief Page\").item.json.id }] },\n    \"Details\": { rich_text: [{ type: \"text\", text: { content: ($json.contract || \"\") } }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "fb2ebca1-ce46-4be3-84da-91943be6ea19",
+      "name": "Log success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        180
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"B \u00b7 Contract render FAILED\" } }] },\n    \"Job\": { select: { name: \"B\" } },\n    \"Outcome\": { select: { name: \"Failed\" } },\n    \"Brief\": { relation: [{ id: $(\"Get Brief Page\").item.json.id }] },\n    \"Error\": { rich_text: [{ type: \"text\", text: { content: String($json.error || \"unknown\") } }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "7f8b8f8e-f6aa-48cb-9984-fae83a59a24e",
+      "name": "Log failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        320
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Brief Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Brief Page": {
+      "main": [
+        [
+          {
+            "node": "Gate: Status=Approved AND not yet rendered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate: Status=Approved AND not yet rendered": {
+      "main": [
+        [
+          {
+            "node": "POST /render-contract to PC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /render-contract to PC": {
+      "main": [
+        [
+          {
+            "node": "Render succeeded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render succeeded?": {
+      "main": [
+        [
+          {
+            "node": "Log success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "19b57229-24ae-4929-ac23-22aa9fa04d97",
+  "tags": [
+    {
+      "name": "ks-automation"
+    },
+    {
+      "name": "v2.1.8"
+    },
+    {
+      "name": "webhook"
+    },
+    {
+      "name": "hybrid-pc"
+    }
+  ]
+}

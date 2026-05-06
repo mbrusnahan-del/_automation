@@ -48,3 +48,8 @@ desktop.ini
 
 # ── Local migration artifacts (one-off, not part of the pipeline) ───────
 migration/
+
+# ── Session-only scratch files (n8n admin extracts, dry-run captures) ──
+n8n/_tmp*.json
+n8n/a02_live.json
+_samples/

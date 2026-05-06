@@ -1,0 +1,242 @@
+{
+  "name": "KS A02 \u2014 Provision Fee Schedule on new Brief (v2.1.8 webhook)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ks-a02-fee-schedule",
+        "authentication": "none",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "bb157c82-d78d-4059-83c6-fedc0d3d6ede",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "81b56a4d-3c8a-45e4-9d48-132b19f27911"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.body.data.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "options": {}
+      },
+      "id": "970181c8-18df-4393-9f0b-28a94b6e3753",
+      "name": "Get Brief Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/databases",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"page_id\", page_id: $json.id },\n  title: [{ type: \"text\", text: { content: \"\ud83d\udcb5 Fee Schedule\" } }],\n  is_inline: true,\n  properties: {\n    \"Service\": { title: {} },\n    \"Include\": { formula: { expression: \"if(empty(prop(\\\"Amount\\\")), false, prop(\\\"Amount\\\") > 0)\" } },\n    \"Type\": { select: { options: [\n      { name: \"Fixed Fee\", color: \"blue\" },\n      { name: \"Hourly\", color: \"yellow\" },\n      { name: \"Not to Exceed\", color: \"green\" }\n    ] } },\n    \"Amount\": { number: { format: \"dollar\" } },\n    \"Order\": { number: { format: \"number\" } }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "1ad04aac-c43d-4cfe-9dcc-f76a09397c1e",
+      "name": "Create Fee Schedule child DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const db = $input.first().json;\nconst databaseId = db.id;\nconst seeds = [\n  \"Schematic Design\",\n  \"Design Development\",\n  \"Construction Documents\",\n  \"Construction Administration\",\n  \"Special Structural Inspections\",\n  \"Engineering Site Visits\",\n];\nreturn seeds.map((service, i) => ({ json: { databaseId, service, order: i + 1 } }));"
+      },
+      "id": "ee96688b-28d6-4445-8ecb-20153c59c290",
+      "name": "Fan out 6 seed rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"database_id\", database_id: $json.databaseId },\n  properties: {\n    \"Service\": { title: [{ type: \"text\", text: { content: $json.service } }] },\n    \"Order\": { number: $json.order }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "f32a1778-c40a-4294-a14f-5862f41eb561",
+      "name": "Create seed row",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"A02 \u00b7 Provisioned Fee Schedule (6 rows)\" } }] },\n    \"Job\": { select: { name: \"A02\" } },\n    \"Outcome\": { select: { name: \"Success\" } },\n    \"Brief\": { relation: [{ id: $(\"Get Brief Page\").item.json.id }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "fc57435d-bab6-41a5-87fb-933712cd46a6",
+      "name": "Log to Automation Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Brief Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Brief Page": {
+      "main": [
+        [
+          {
+            "node": "Create Fee Schedule child DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Fee Schedule child DB": {
+      "main": [
+        [
+          {
+            "node": "Fan out 6 seed rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fan out 6 seed rows": {
+      "main": [
+        [
+          {
+            "node": "Create seed row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create seed row": {
+      "main": [
+        [
+          {
+            "node": "Log to Automation Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "57f15a06-80aa-4fe8-8465-813923d546fa",
+  "tags": [
+    {
+      "name": "ks-automation"
+    },
+    {
+      "name": "v2.1.8"
+    },
+    {
+      "name": "webhook"
+    }
+  ]
+}

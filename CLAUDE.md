@@ -88,12 +88,32 @@ People:           72ab13bc-f91f-47c4-9759-e392e0f79e1e
 These fields moved **off** Projects and **onto** Proposal Brief. Any code that
 still reads them from the Project page is wrong:
 
-- ICC Code Year, Jurisdiction, City, State, Project Type, Project Street
+- ICC Code Year, Jurisdiction, City, State, Project Street
 - Reimbursables Treatment (parsed from Brief body checkbox)
 
 Projects keeps: Project Name, Place, Approx. SF, Scope Description, DB
 relations, people, `Engineering Status`, `Folder` (checkbox),
 `SharePoint Folder` (url), `Proposal Brief` (relation).
+
+## Project Type ownership flip (2026-05-05, v2.1.9)
+
+Project Type was originally moved onto the Brief in the 2026-04-22 rework, then
+flipped back: it's now a **select on the Projects DB** (canonical source of
+truth) and a **rollup on the Brief** that pulls from the linked Project. This
+matches the natural hierarchy — the type belongs to the project itself, not
+to one of its documents — and means engineers see (and partners filter on)
+Project Type at the Project level.
+
+Read sites that matter:
+- `sweep.py::_resolve_project_dict` reads `Project Type` directly from the
+  Project page using `select_val(p, ProjectProp.PROJECT_TYPE)`.
+- `sweep.py::_resolve_brief_overlay_dict` no longer overlays Project Type;
+  the Brief's rollup column is for display only.
+- `n8n/render_service/main.py::parse_project` already read from the Project
+  page, so the Cloud Run service was correct from the start.
+
+If you ever need to re-flip, both writes to the Brief select and back-mapping
+through the rollup are migration steps — never do partial flips.
 
 ## Workflow gates — do not render prematurely
 

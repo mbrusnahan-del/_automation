@@ -1,0 +1,267 @@
+{
+  "name": "KS D \u2014 Admins Notified on Brief Ready for Review (v2.1.8 webhook)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ks-d-admins-notified",
+        "authentication": "none",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "ee3a96f3-f098-4ea7-a8f9-5cd750a30d94",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "12a6fe71-ea01-4bc8-bf9d-1d76241cae04"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.body.data.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "options": {}
+      },
+      "id": "622f5a66-b93a-44a7-8cf8-529c9c52547e",
+      "name": "Get Brief Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.properties.Status.select?.name || \"\" }}",
+              "rightValue": "Ready for Admin Review",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties[\"Admins Notified\"].checkbox }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          }
+        },
+        "options": {}
+      },
+      "id": "d0568c2c-7083-48bd-865f-b19e00c6a644",
+      "name": "Gate: Status=Ready for Admin Review AND Admins Notified=false",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.notion.com/v1/pages/{{ $(\"Get Brief Page\").item.json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ properties: { \"Admins Notified\": { checkbox: true } } }) }}",
+        "options": {}
+      },
+      "id": "6d0fd37c-4e9f-43e2-a56d-dd9e1ecf807f",
+      "name": "Flip Admins Notified = true",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.notion.com/v1/pages/{{ $(\"Get Brief Page\").item.json.properties.Project.relation[0].id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ properties: { \"Status\": { select: { name: \"Admin Review\" } } } }) }}",
+        "options": {}
+      },
+      "id": "7a5cc7d2-9ba2-4a37-966e-c6bfa16008d2",
+      "name": "Bump Project.Status = Admin Review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"D \u00b7 Admins notified for \" + ($(\"Get Brief Page\").item.json.properties.Name.title[0]?.plain_text || \"Brief\") } }] },\n    \"Job\": { select: { name: \"D\" } },\n    \"Outcome\": { select: { name: \"Success\" } },\n    \"Brief\": { relation: [{ id: $(\"Get Brief Page\").item.json.id }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "409596d8-18a6-4c5c-bcf7-b457ef15cc61",
+      "name": "Log to Automation Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Brief Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Brief Page": {
+      "main": [
+        [
+          {
+            "node": "Gate: Status=Ready for Admin Review AND Admins Notified=false",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate: Status=Ready for Admin Review AND Admins Notified=false": {
+      "main": [
+        [
+          {
+            "node": "Flip Admins Notified = true",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flip Admins Notified = true": {
+      "main": [
+        [
+          {
+            "node": "Bump Project.Status = Admin Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bump Project.Status = Admin Review": {
+      "main": [
+        [
+          {
+            "node": "Log to Automation Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "575b0eb2-2655-440e-abc1-8e4405f982f9",
+  "tags": [
+    {
+      "name": "ks-automation"
+    },
+    {
+      "name": "v2.1.8"
+    },
+    {
+      "name": "webhook"
+    }
+  ]
+}

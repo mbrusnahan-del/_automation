@@ -898,6 +898,194 @@ def job_a(dry: bool) -> JobResult:
 
 
 # ========================================================================
+# Job F — Fee Memo PDF (post-folder, internal-only assessment tool)
+# ========================================================================
+
+
+def _docx_to_pdf(docx_path: str, pdf_path: str) -> bool:
+    """Convert .docx to .pdf using whatever's available locally.
+    Tries docx2pdf first (uses MS Word COM, fast on Windows where Word is
+    installed), then falls back to libreoffice/soffice headless.
+    Returns True on success, False if no converter is available."""
+    # Method 1: docx2pdf (Windows with MS Word installed)
+    try:
+        from docx2pdf import convert
+        convert(docx_path, pdf_path)
+        if os.path.exists(pdf_path):
+            return True
+    except ImportError:
+        log.debug("docx2pdf not installed; trying libreoffice fallback")
+    except Exception as e:
+        log.warning("docx2pdf failed (%s); trying libreoffice fallback", e)
+
+    # Method 2: libreoffice headless
+    import subprocess
+    for cmd in ('soffice', 'libreoffice'):
+        try:
+            subprocess.run(
+                [cmd, '--headless', '--convert-to', 'pdf',
+                 '--outdir', os.path.dirname(pdf_path), docx_path],
+                check=True, timeout=120, capture_output=True
+            )
+            # libreoffice names the output by stripping the input extension.
+            # If the produced file isn't at our target path, move it.
+            produced = os.path.join(
+                os.path.dirname(pdf_path),
+                os.path.splitext(os.path.basename(docx_path))[0] + '.pdf'
+            )
+            if produced != pdf_path and os.path.exists(produced):
+                os.replace(produced, pdf_path)
+            if os.path.exists(pdf_path):
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired,
+                subprocess.CalledProcessError):
+            continue
+    return False
+
+
+def job_f(dry: bool) -> JobResult:
+    """Generate the Fee Analysis Memo PDF for projects whose folder exists
+    and whose Project Type is set. Internal-only — drops directly into the
+    project root (not the Contracts subfolder, which is for client deliverables).
+
+    Idempotent: skips per-project if the PDF already exists in the folder.
+    Use --jobs F alone after manual deletion to force regeneration."""
+    r = JobResult()
+    filt = {
+        "and": [
+            {"property": config.ProjectProp.FOLDER, "checkbox": {"equals": True}},
+            {"property": config.ProjectProp.PROJECT_TYPE, "select": {"is_not_empty": True}},
+        ]
+    }
+    try:
+        rows = query_data_source(config.PROJECTS_DS_ID, filt, page_size=10)
+    except NotionError as e:
+        r.failed += 1
+        r.errors.append(f"F query failed: {e}")
+        return r
+
+    # Lazy imports — only loaded when Job F actually runs.
+    from render_proposal_package import ONEDRIVE_ROOT
+    import fee_memo
+
+    for project in rows:
+        proj_id = project["id"]
+        props = project["properties"]
+        name = title_val(props, config.ProjectProp.NAME)
+
+        try:
+            number, short = config.parse_project_name(name)
+        except config.InvalidProjectNumberError:
+            # Job A would have already logged this; skip silently here.
+            continue
+
+        city = text_val(props, config.ProjectProp.CITY)
+        state = text_val(props, config.ProjectProp.STATE)
+        notion_type = select_val(props, config.ProjectProp.PROJECT_TYPE)
+
+        if not notion_type:
+            r.skipped += 1
+            log_row("F", "Skipped",
+                    title=f"F · {name} skipped (no Project Type)",
+                    project_id=proj_id, details="Project Type empty.")
+            continue
+
+        try:
+            year = config.build_year_from_number(number)
+            folder_name = config.build_folder_name(number, short, city, state)
+            folder_path = os.path.join(ONEDRIVE_ROOT, year, folder_name)
+
+            pdf_filename = f"{number} Fee Analysis Memo.pdf"
+            pdf_path = os.path.join(folder_path, pdf_filename)
+
+            # Idempotency
+            if os.path.exists(pdf_path):
+                r.skipped += 1
+                log_row("F", "Skipped",
+                        title=f"F · {name} memo already exists",
+                        project_id=proj_id,
+                        details=f"PDF: {pdf_filename}")
+                continue
+
+            if not os.path.isdir(folder_path):
+                # Folder=true in Notion but folder missing on disk — Job A
+                # might be in flight, or the OneDrive sync is behind.
+                r.skipped += 1
+                log_row("F", "Skipped",
+                        title=f"F · {name} skipped (folder not yet on disk)",
+                        project_id=proj_id, details=f"Expected: {folder_path}")
+                continue
+
+            if dry:
+                log.info("[dry] F would generate %s", pdf_path)
+                r.touched += 1
+                continue
+
+            # Translate Notion's Project Type select to fee_memo's internal type.
+            fee_memo_type = config.NOTION_TO_FEE_MEMO_TYPE.get(notion_type)
+            if not fee_memo_type:
+                err = (f"Unknown Project Type {notion_type!r} — no entry in "
+                       f"NOTION_TO_FEE_MEMO_TYPE. Add it to config.py.")
+                r.failed += 1
+                r.errors.append(err)
+                log_row("F", "Failed",
+                        title=f"F · {name} unmapped Project Type",
+                        project_id=proj_id, error=err)
+                continue
+
+            # Build the project dict that render_fee_memo expects. Fields we
+            # don't have on the Project itself stay empty; the memo's fallback
+            # text handles missing values gracefully.
+            project_dict = {
+                "project_name": short,
+                "ks_job_number": number,
+                "project_type": fee_memo_type,
+                "approx_sf": 0,
+                "jurisdiction": "",
+                "location": f"{city}, {state}".strip(", "),
+                "scope_description": "",
+                "partner": "",
+                "client_company_name": "",
+                "engineering_status": status_val(props, config.ProjectProp.ENGINEERING_STATUS) or "",
+            }
+
+            docx_filename = f"{number} Fee Analysis Memo.docx"
+            docx_path, stats_d, tiers = fee_memo.render_fee_memo(
+                project_dict, folder_path, filename=docx_filename
+            )
+
+            ok = _docx_to_pdf(docx_path, pdf_path)
+            if not ok:
+                err = ("DOCX generated but PDF conversion failed. Install "
+                       "docx2pdf (`pip install docx2pdf`) or LibreOffice to "
+                       "enable conversion.")
+                r.failed += 1
+                r.errors.append(err)
+                log_row("F", "Failed",
+                        title=f"F · {name} PDF conversion failed",
+                        project_id=proj_id, error=err,
+                        details=f"DOCX saved at {docx_path}")
+                continue
+
+            r.touched += 1
+            tiers_str = (f"Cons ${tiers['conservative']:,} / "
+                         f"Mkt ${tiers['market']:,} / "
+                         f"Stretch ${tiers['stretch']:,}") if tiers else "n/a"
+            log_row("F", "Success",
+                    title=f"F · Fee memo generated for {name}",
+                    project_id=proj_id,
+                    details=f"PDF: {pdf_filename}; tiers: {tiers_str}")
+        except Exception as e:  # noqa: BLE001 — broad catch is intentional per Job B pattern
+            err = str(e)
+            r.failed += 1
+            r.errors.append(err)
+            log_row("F", "Failed",
+                    title=f"F · Fee memo failed for {name}",
+                    project_id=proj_id, error=err)
+    return r
+
+
+# ========================================================================
 # Job C — Engineer notification
 # ========================================================================
 
@@ -1113,11 +1301,12 @@ def job_d(dry: bool) -> JobResult:
 def _resolve_project_dict(project_page: dict) -> dict:
     """Flatten a Notion Project page into the dict render_from_notion expects.
 
-    v2.1.4: Project Type / Scope Description / Approx. Structural SF were
-    removed from the Projects DB. Project Type now lives on the Brief only;
-    scope and SF flow through the Brief body + Fee Schedule. The empty
-    strings returned below keep the merge dict shape stable so render_from_notion
-    doesn't have to change.
+    v2.1.9: Project Type was moved back onto the Projects DB (as the canonical
+    select). The Brief now displays Project Type via a rollup, so the renderer
+    reads it directly off the Project here — no Brief overlay needed for this
+    field. Scope Description and Approx. Structural SF still flow through the
+    Brief body + Fee Schedule, so they stay empty/zero on this side and get
+    overlaid downstream.
     """
     p = project_page["properties"]
     return {
@@ -1125,7 +1314,7 @@ def _resolve_project_dict(project_page: dict) -> dict:
         "City":                    text_val(p, config.ProjectProp.CITY),
         "State":                   text_val(p, config.ProjectProp.STATE),
         "Project Street":          text_val(p, config.ProjectProp.PROJECT_STREET),
-        "Project Type":            "",          # overlaid from Brief later
+        "Project Type":            select_val(p, config.ProjectProp.PROJECT_TYPE) or "",
         "Scope Description":       "",          # legacy field, now empty
         "SharePoint Folder":       url_val(p, config.ProjectProp.SHAREPOINT_FOLDER) or "",
         "Approx. Structural SF":   0,            # legacy field, now zero
@@ -1368,14 +1557,18 @@ def _resolve_brief_overlay_dict(brief_page: dict) -> dict:
     v2.1.8: 'Project Street' on the merged dict now sources from the Brief's
     'Project Address' property. The renderer still reads project.get(
     'Project Street') downstream — the rename only happens in the Notion
-    schema, not in the renderer's vocabulary."""
+    schema, not in the renderer's vocabulary.
+
+    v2.1.9: 'Project Type' is no longer overlaid here — the canonical select
+    moved back to Projects DB and is read by _resolve_project_dict. The
+    Brief still has a 'Project Type' field, but it's a rollup pulling from
+    the linked Project, so the value is the same either way."""
     bp = brief_page["properties"]
     return {
         "City":            text_val(bp, config.BriefProp.CITY),
         "State":           text_val(bp, config.BriefProp.STATE),
         "Jurisdiction":    text_val(bp, config.BriefProp.JURISDICTION),
         "ICC Code Year":   select_val(bp, config.BriefProp.ICC_CODE_YEAR) or "",
-        "Project Type":    select_val(bp, config.BriefProp.PROJECT_TYPE) or "",
         # v2.1.8: address now sourced from Brief.Project Address, not
         # Project.Project Street. Brief is canonical for proposal context.
         "Project Street":  text_val(bp, config.BriefProp.PROJECT_ADDRESS),
@@ -1482,11 +1675,12 @@ JOB_FUNCS = {
     "A0": job_a0,
     "A02": job_a02,
     "A": job_a,
+    "F": job_f,    # Fee memo PDF — runs after A so the folder exists on disk
     "C": job_c,
     "D": job_d,
     "B": job_b,
 }
-JOB_ORDER = ["A0", "A02", "A", "C", "D", "B"]
+JOB_ORDER = ["A0", "A02", "A", "F", "C", "D", "B"]
 
 
 def main(argv: list[str]) -> int:

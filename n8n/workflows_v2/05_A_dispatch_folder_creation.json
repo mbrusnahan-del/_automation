@@ -1,0 +1,334 @@
+{
+  "name": "KS A \u2014 Dispatch OneDrive folder creation (v2.1.8 webhook, calls PC)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ks-a-folder-creation",
+        "authentication": "none",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "8c7ccd8a-1cc4-47ff-8277-4f5e472831b9",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "872829fc-fb3d-43c6-9952-94960ef551e0"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.body.data.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "options": {}
+      },
+      "id": "ecbbbf11-7966-4fce-8102-2399fa75d5ef",
+      "name": "Get Project Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.properties.Folder.checkbox }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties[\"Intake Complete\"].checkbox }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{ ($json.properties.City?.rich_text?.[0]?.plain_text || \"\").length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "leftValue": "={{ ($json.properties.State?.rich_text?.[0]?.plain_text || \"\").length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties.ENGINEER?.people?.length || 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "leftValue": "={{ $json.properties.Admin?.people?.length || 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          }
+        },
+        "options": {}
+      },
+      "id": "f897bd3e-fc0e-467d-b14c-4454e6c5bd18",
+      "name": "Gate: v2.1.8 Job A",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.KS_WEBHOOK_BASE_URL }}/create-folder",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-KS-Token",
+              "value": "={{ $env.KS_WEBHOOK_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ project_id: $json.id }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "1d55e00a-a464-43d5-887a-67f9d330e778",
+      "name": "POST /create-folder to PC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          }
+        },
+        "options": {}
+      },
+      "id": "ed4b87e9-165c-4410-a787-f181ad44e42a",
+      "name": "Dispatch succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"A \u00b7 Folder created via PC\" } }] },\n    \"Job\": { select: { name: \"A\" } },\n    \"Outcome\": { select: { name: \"Success\" } },\n    \"Project\": { relation: [{ id: $(\"Get Project Page\").item.json.id }] },\n    \"Details\": { rich_text: [{ type: \"text\", text: { content: ($json.path || $json.url || \"\") } }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "c91f328e-f3e1-4724-b4bc-1d0486db0a6c",
+      "name": "Log success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        180
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            }
+          ]
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"A \u00b7 Folder creation FAILED\" } }] },\n    \"Job\": { select: { name: \"A\" } },\n    \"Outcome\": { select: { name: \"Failed\" } },\n    \"Project\": { relation: [{ id: $(\"Get Project Page\").item.json.id }] },\n    \"Error\": { rich_text: [{ type: \"text\", text: { content: String($json.error || \"unknown\") } }] }\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "3ff07f85-5a3e-4a67-af3b-ac31adbe3653",
+      "name": "Log failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        320
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Project Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Project Page": {
+      "main": [
+        [
+          {
+            "node": "Gate: v2.1.8 Job A",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gate: v2.1.8 Job A": {
+      "main": [
+        [
+          {
+            "node": "POST /create-folder to PC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /create-folder to PC": {
+      "main": [
+        [
+          {
+            "node": "Dispatch succeeded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dispatch succeeded?": {
+      "main": [
+        [
+          {
+            "node": "Log success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "070a8c75-ff7c-4689-b2bd-57ec476c5d32",
+  "tags": [
+    {
+      "name": "ks-automation"
+    },
+    {
+      "name": "v2.1.8"
+    },
+    {
+      "name": "webhook"
+    },
+    {
+      "name": "hybrid-pc"
+    }
+  ]
+}

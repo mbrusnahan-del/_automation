@@ -1,0 +1,171 @@
+project_number,proposed_type,confidence,notes
+25018032.1,Residential – Remodel / Addition,High,APPLIED
+25043050,Residential – Remodel / Addition,High,APPLIED
+25097072,Residential – Remodel / Addition,High,APPLIED
+25098044,Residential – Remodel / Addition,High,APPLIED
+25103092,Residential – Remodel / Addition,High,
+25121033,Residential – Remodel / Addition,High,Sheldon Residence Covered Patio
+25149094,Residential – Remodel / Addition,High,Graves Residence Remodel
+25166060,Residential – Remodel / Addition,High,Lara Residence Remodel
+25168032,Residential – Remodel / Addition,High,Calle Ventura Dormer Project
+25171011,Residential – Remodel / Addition,High,Craven Residence Patio
+25171011.1,Residential – Remodel / Addition,High,Craven Residence Patio SSI
+25176144,Residential – Remodel / Addition,High,Benson Residence Remodel
+25210111,Residential – Remodel / Addition,High,Laurel Lane Residential Remodel
+4Line Gilbert Christian Remodel,Religious,High,Confirmed by Michael
+240043,Residential – Single-Family,High,Coss Residence
+25020011,Residential – Single-Family,High,Bagby Residence
+25041011,Residential – Single-Family,High,McDougall Residence
+25053031,Residential – Single-Family,Medium,Kirkwood Residence
+25129061,Residential – Single-Family,High,Clouse Residence
+25138051,Residential – Single-Family,High,Stanley Residence
+25143089,Residential – Single-Family,High,Kretchmer Residence Cabin
+25195108,Residential – Single-Family,Medium,Johnson Residence
+25213061,Residential – Single-Family,Medium,Weinberger Residence
+25157089,Residential – Single-Family,High,Griffith Residence Pods - confirmed by Michael
+240044,Residential – Multi‑Family,High,Wailea Hotel Remodel
+25007029,Residential – Multi‑Family,High,Williams Four Points Hotel Conversion
+25128088,Residential – Multi‑Family,High,Heartland Suite 105 hotel - confirmed by Michael
+25154001,Residential – Multi‑Family,High,Studio Res by Marriott
+25198019,Residential – Multi‑Family,High,Double Tree
+25198019.1,Residential – Multi‑Family,High,DoubleTree Hanging Partition Add Service
+25202004,Existing Building / Assessment,Medium,Legacy Hotel Structural Observation Report
+25207019,Residential – Multi‑Family,High,Apache Bldg Apartments
+25038031.1,Religious,High,Antioch Church
+25126087,Religious,High,Grace Bible Church
+25178088,Religious,High,MT Baptist Church
+25201031,Religious,High,City of Grace Church Renovation
+25206031,Religious,High,Vineyard Church
+25052001,Education,High,Faith Christian school - confirmed by Michael
+25116061,Restaurant,High,Jinya TI Queen Creek
+25133033,Restaurant,High,Roma Pizzeria
+25147049,Restaurant,High,Potbelly TI
+25151049,Restaurant,High,Project Lean Nation
+25159020,Restaurant,High,Restaurant Tenant Mech'l T.I. Chandler
+25180057,Restaurant,High,Kungfu Noodle Restaurant T.I.
+25181057,Restaurant,High,Korean BBQ T.I.
+25216061,Restaurant,High,Jinya TI Tempe
+25131061,Storage,High,Microchip Storage
+25190049,Storage,High,Carefree Highway Self Storage
+25197112,Storage,High,SRPMIC Landscape Storage MEP
+25006001,Industrial,Medium,Crash Champions Body Shop
+25008019,Industrial,High,Triax Industries
+25101049,Industrial,High,Emerald Industrial Building Suite 5
+25109080,Industrial,Medium,Missouri Central Plant Upgrades
+25130031,Industrial,Medium,Ironwood Phase 2
+25108057,PEMB,High,Gardel Metal Building
+25177102,PEMB,Medium,Garmak Modular Building Foundations
+25192033,PEMB,High,Sunstate Companies PEMB
+24-0040,Commercial – TI,High,Phoenix Retail at Miller and Southern
+240040,Commercial – TI,High,Miller Marketplace
+240042,Commercial – TI,Medium,Club Valencia Repairs
+25045049,Commercial – TI,High,Beach Club Wylie
+25073049,Commercial – TI,High,Prologis RediCarpet TI
+25085049,Commercial – TI,High,Beach Club Denton County
+25104049,Commercial – TI,High,Beach Club City of Denton
+25111049,Commercial – TI,High,Beach Club Fort Worth
+25111049.3,Commercial – TI,High,Beach Club Fort Worth Fence Ftg Add Serv
+25111049.4,Commercial – TI,High,Beach Club Fort Worth Mini Tunnel Add Serv
+25124084,Commercial – TI,Medium,Viasat Tempe SMS Lab Expansion
+25144066,Commercial – TI,Medium,Awhautkee Lakes Bathroom BLD
+25152096,Commercial – TI,High,Xtylo Beauty School Remodel
+25161049,Commercial – TI,High,Beach Club Express Wash Jacksboro
+25162049.1,Commercial – TI,High,Beach Club Whitehouse
+25170008,Commercial – TI,High,ACP Performance TI
+25179049,Commercial – TI,High,R2 Contractors TI Build-out
+25189049,Commercial – TI,High,Beach Club Garland
+25196049,Commercial – TI,High,Beach Club Conversion
+25214061,Commercial – TI,High,WECA TI
+25140019,Medical,High,CORE Construction MRI TI
+25001026,Specialty Structures,Medium,White Tank Restroom
+25018032.2,UNCONFIRMED,Low,Rockridge - unclear
+25047052,Specialty Structures,High,Tama TC Steel Robot Gantry
+25135051,Specialty Structures,High,Pratz Residence Site Structures
+240027,Specialty Structures,Medium,Mohave Rattlesnake Basin
+240051,UNCONFIRMED,Low,Veledniteky - unclear
+25110060,Existing Building / Assessment,Medium,Lynwood Historic Renovation
+25110060.2,Existing Building / Assessment,Medium,Lynwood (Dye) Historic Renovation
+25204110.1,Existing Building / Assessment,High,Lumina on 19th Repair Drawings
+25209014,Existing Building / Assessment,Medium,Gila County Globe Infrastructure
+25209014.1,Existing Building / Assessment,Medium,Gila County Globe Infrastructure ADD SERV 1
+25078014,Existing Building / Assessment,Medium,Mill Ditch Road Infrastructure
+25054126.1,Existing Building / Assessment,Low,Color Me Mine Design Revisions - revisions only
+_TEST 26000001,SKIP,—,Test data
+26025080,Commercial – TI,High,Holyoke Development A/C Unit Replacement (mech TI)
+26024084,Commercial – TI,Medium,Microchip AHU-2 (mech TI)
+26009051,Residential – Remodel / Addition,High,Ayala Residential Remodel
+26008094,Residential – Multi‑Family,High,Salas Residential ADU
+26007057,Industrial,Medium,Aztec Milling Pump Building
+26006057,Commercial – TI,High,Mission Warehouse Mech'l T.I.
+26005113,Residential – Remodel / Addition,High,Moore Residence Remodel
+26004061,PEMB,High,CDL Mech Campus PMB - PMB assumed PEMB confirmed by Michael
+26003049,Residential – Multi‑Family,High,Townplace Suites hotel
+26044000,SKIP,—,Test page for automation info - leave alone per Michael
+260000000,SKIP,—,Placeholder/test row
+Rodger Wilson Residential Remodel,Residential – Remodel / Addition,High,DEAD - Rodger Wilson Residential Remodel
+25204021.2,Specialty Structures,Medium,DEAD - Lumina on 19th Temp Shoring
+26065001,Commercial – TI,Medium,DEAD - Orrstown Bank (could be Office)
+26059027,Residential – Remodel / Addition,High,DEAD - Simpsons Residential Remodel
+26071001,Medical,High,DEAD - Familiar Roads Health Care Facility
+26046049,Medical,High,DEAD - Dental Office Roanoke
+25042032,Residential – Single-Family,Medium,DEAD - 70th Place Residence
+26031032,Residential – Single-Family,Medium,DEAD - 35th Residence North
+26029049,Specialty Structures,Medium,DEAD - Staircase Renovation Project
+26010008,Existing Building / Assessment,High,DEAD - Biltmore Wood Beam Repair
+26016001,Residential – Multi‑Family,High,DEAD - Studio Res by Marriot Charleston SC
+25114025,Specialty Structures,Medium,DEAD - Fat Tuesday TV Frame
+25183016,Restaurant,High,DEAD - Obon Sushi Bar Ramen
+25066061,Industrial,Medium,DEAD - Bethany Autoshop
+25148049,Commercial – TI,High,DEAD - Spec Suite TI
+25118061,Residential – Multi‑Family,High,DEAD - Angela Multi-Family
+25155061,PEMB,High,DEAD - BMF Building PEMB
+25122066,Commercial – TI,High,DEAD - Dove Valley Retail Development
+25194049,Commercial – TI,High,DEAD - Peoria Fire House Event Center - confirmed by Michael
+25212049,UNCONFIRMED,Low,DEAD - Largee Studios - type unclear
+25199049,Commercial – TI,High,DEAD - Bank Remodel 77 S Val Vista Rd
+25188105,Residential – Remodel / Addition,High,DEAD - Raisanen Residence Remodel
+25045049.2,Commercial – TI,High,DEAD - Beach Club Wylie New Geotech Add Serv
+24049004,Residential – Multi‑Family,High,ON HOLD - Juniper Pines Apartment
+25150061,Residential – Remodel / Addition,High,ON HOLD - The House Patio Cover
+25191106,Residential – Single-Family,Medium,ON HOLD - Roy Hunt Residence
+26002008,Residential – Remodel / Addition,High,ON HOLD - Avalon House Remodel
+26063131,Industrial,High,ON HOLD - Kenley equipment hangar door - confirmed by Michael
+26085049,Residential – Remodel / Addition,High,ON HOLD - Caminos De La Paz residential remodel - confirmed by Michael
+2 story custom home buckeye az 5600sf $9500 Rogelio Arrietta,Residential – Single-Family,High,ON HOLD - 2 story custom home Buckeye
+26079061,Residential – Remodel / Addition,High,ON HOLD - Silvercrest Residential Remodel
+Steven US Air - mech ti,Commercial – TI,High,ON HOLD - Steven US Air mech TI
+26020066,Commercial – TI,High,ON HOLD - Barracks T.I.
+25074001,Industrial,Medium,ON HOLD - B&F Petroleum
+25141093,Existing Building / Assessment,High,ON HOLD - Traina Residence Tesla Damage
+25200016,UNCONFIRMED,Low,ON HOLD - Marco Mercado Estrella II - need scope
+25182057,Commercial – TI,High,ON HOLD - Tempe Warehouse T.I.
+26050127,Existing Building / Assessment,High,IGNORE - Haven on Hamilton Peer Review
+26039094,Existing Building / Assessment,High,IGNORE - Gainey Building Slab Review
+26012033,Existing Building / Assessment,High,IGNORE - Circus Arcadia Code Update
+26013094,Specialty Structures,Medium,IGNORE - Danson Group Mech'l Screen Wall
+25210111.1,Residential – Remodel / Addition,High,IGNORE - Laurel Lane Add Service
+25211049,Existing Building / Assessment,High,IGNORE - Shoe Palace Demolition As-Built
+26001049,Restaurant,Medium,IGNORE - Smiling Moose (sandwich chain)
+25215049,Commercial – TI,High,IGNORE - True Rest Spa TI
+25208001,Residential – Multi‑Family,High,IGNORE - Bartonsville Marriot Dual Brand Hotel
+25186057,Commercial – TI,High,IGNORE - Texas Warehouse Interior Demising Wall
+25197084,Medical,High,IGNORE - SRPMIC River People Health Center
+25193107,Residential – Multi‑Family,High,IGNORE - Townplace Suites Hotel Phoenix
+25187066,Residential – Remodel / Addition,High,IGNORE - Brooke Residence Remodel
+25184103,Residential – Single-Family,Medium,IGNORE - Swanson Prescott House (take over)
+_TEST — n8n Sandbox,SKIP,—,IGNORE - n8n Sandbox test
+25175114,Residential – Remodel / Addition,High,IGNORE - Benson Residence New Door
+25185104,Residential – Remodel / Addition,High,IGNORE - Bagai Residence Remodel
+25176114,Residential – Remodel / Addition,High,IGNORE - Benson Residence Remodel
+25174061,Residential – Multi‑Family,High,IGNORE - Monterey Multi Family
+25166060.2,Residential – Remodel / Addition,High,IGNORE - Lara Residence Remodel
+25172101,Storage,High,IGNORE - TJX Storage Racking
+25163098,Residential – Remodel / Addition,High,IGNORE - Anabel Interior Remodel residential - confirmed by Michael
+25166060.1,Residential – Remodel / Addition,High,IGNORE - Lara Residence Remodel
+25165011,Existing Building / Assessment,High,IGNORE - Flores Wood Beam Replacement
+25167033,Residential – Multi‑Family,High,IGNORE - Riverwalk Apartments Townhomes
+25160100,Existing Building / Assessment,Medium,IGNORE - Makin Residence Repair Details
+25146032,Residential – Single-Family,Medium,IGNORE - San Miguel Ave Residence
+25158057,Commercial – TI,High,IGNORE - Dallas Warehouse Mech'l T.I.
+25153097,Commercial – TI,Medium,IGNORE - QTS NAL QNO Data Center
+25156061,PEMB,High,IGNORE - Grass Clippings PEMB
