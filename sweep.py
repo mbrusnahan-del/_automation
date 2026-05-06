@@ -955,10 +955,12 @@ def job_f(dry: bool) -> JobResult:
         "and": [
             {"property": config.ProjectProp.FOLDER, "checkbox": {"equals": True}},
             {"property": config.ProjectProp.PROJECT_TYPE, "select": {"is_not_empty": True}},
+            {"property": config.ProjectProp.INTAKE_COMPLETE, "checkbox": {"equals": True}},
+            {"property": config.ProjectProp.FEE_MEMO_GENERATED_AT, "date": {"is_empty": True}},
         ]
     }
     try:
-        rows = query_data_source(config.PROJECTS_DS_ID, filt, page_size=10)
+        rows = query_data_source(config.PROJECTS_DS_ID, filt, page_size=50)
     except NotionError as e:
         r.failed += 1
         r.errors.append(f"F query failed: {e}")
@@ -994,6 +996,16 @@ def job_f(dry: bool) -> JobResult:
             year = config.build_year_from_number(number)
             folder_name = config.build_folder_name(number, short, city, state)
             folder_path = os.path.join(ONEDRIVE_ROOT, year, folder_name)
+
+            # Prefix-scan fallback: handles historical whitespace/casing drift
+            if not os.path.isdir(folder_path):
+                year_dir = os.path.join(ONEDRIVE_ROOT, year)
+                if os.path.isdir(year_dir):
+                    for entry in os.listdir(year_dir):
+                        if entry.startswith(number) and os.path.isdir(os.path.join(year_dir, entry)):
+                            folder_path = os.path.join(year_dir, entry)
+                            log.info("F . using existing folder for %s: %s", number, entry)
+                            break
 
             pdf_filename = f"{number} Fee Analysis Memo.pdf"
             pdf_path = os.path.join(folder_path, pdf_filename)
@@ -1066,6 +1078,16 @@ def job_f(dry: bool) -> JobResult:
                         project_id=proj_id, error=err,
                         details=f"DOCX saved at {docx_path}")
                 continue
+
+            # Stamp Fee Memo Generated At so this project drops out of
+            # future Job F sweeps (mirrors Job B's RENDERED_AT pattern).
+            today_iso = datetime.now(timezone.utc).date().isoformat()
+            try:
+                update_page(proj_id, {
+                    config.ProjectProp.FEE_MEMO_GENERATED_AT: {"date": {"start": today_iso}},
+                })
+            except NotionError as stamp_err:
+                log.warning("F . stamp failed for %s (PDF still saved): %s", name, stamp_err)
 
             r.touched += 1
             tiers_str = (f"Cons ${tiers['conservative']:,} / "

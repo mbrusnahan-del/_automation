@@ -40,6 +40,9 @@ class ProjectProp:
     PROJECT_STREET      = "Project Street"
     # Project Type (v2.1.9: moved back onto Projects DB; Brief now rolls it up)
     PROJECT_TYPE        = "Project Type"
+    # Fee memo idempotency stamp (v2.1.11: Job F sets this after successful
+    # PDF generation. Mirrors the BriefProp.RENDERED_AT pattern Job B uses.)
+    FEE_MEMO_GENERATED_AT = "Fee Memo Generated At"
     # Relations
     PROPOSAL_BRIEF      = "Proposal Brief"
     # Automation state
