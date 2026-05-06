@@ -76,6 +76,44 @@ def _to_num(v):
         return 0
 
 
+# Markers that flag a row as a test / sandbox / placeholder entry. Any row
+# whose Name contains one of these (case-insensitive) gets dropped before
+# aggregation. Used to prevent test pages from polluting fee comp stats.
+_TEST_MARKERS = (
+    "_test",
+    "automation test",
+    "n8n sandbox",
+    "sandbox",
+    "placeholder",
+    "do not use",
+    "delete me",
+)
+
+
+def _is_meaningful_row(rec):
+    """Return True if a row has enough info to be a real comp entry.
+
+    Skips rows where:
+      - Name is blank
+      - Name has no alphabetic characters (e.g., "25217" by itself, or
+        "26106000" — just project numbers with no scope description)
+      - Name contains a test/sandbox marker (see _TEST_MARKERS)
+
+    Real comp rows always have a project name with some descriptive text
+    even if fees haven't been entered yet (a "lost" entry still has a
+    client/project name attached).
+    """
+    name = (rec.get("Name") or "").strip()
+    if not name:
+        return False
+    if not any(ch.isalpha() for ch in name):
+        return False
+    low = name.lower()
+    if any(marker in low for marker in _TEST_MARKERS):
+        return False
+    return True
+
+
 def extract_sheet(ws, col_map):
     recs = []
     for row_idx in range(6, ws.max_row + 1):
@@ -159,12 +197,17 @@ def run(force=False):
     if "Jobs 26KS" in wb.sheetnames:
         excel_rows += extract_sheet(wb["Jobs 26KS"], HEADERS_26KS)
 
-    # Aggregate by base job (collapse .1/.2/.3)
+    # Aggregate by base job (collapse .1/.2/.3). Filter out placeholder /
+    # test / hollow rows up front so they never enter the comp database.
     by_base = defaultdict(lambda: {"design": 0, "cd": 0, "ca": 0, "total_signed": 0,
                                     "won": False, "name": None, "rows": 0})
+    skipped_rows = 0
     for r in excel_rows:
         job = str(r.get("Job") or "").strip()
         if not job:
+            continue
+        if not _is_meaningful_row(r):
+            skipped_rows += 1
             continue
         base = job.split(".")[0]
         agg = by_base[base]
@@ -216,36 +259,4 @@ def run(force=False):
             comp = {
                 "name": (agg["name"] or base)[:80],
                 "job": base,
-                "type": _infer_type(agg["name"]),
-                "won": agg["won"],
-                "design": agg["design"] if agg["design"] > 0 else None,
-                "cd": agg["cd"] if agg["cd"] > 0 else None,
-                "ca": agg["ca"] if agg["ca"] > 0 else None,
-                "total_signed": total if agg["won"] else None,
-                "total_proposed": total if (total and not agg["won"]) else None,
-                "approx_sf": None, "partner": None, "complexity": None,
-                "lost_reason": None, "construction_cost": None,
-            }
-            cache["comps"].append(comp)
-            cache_by_base[base] = comp
-            added += 1
-
-    # Write cache
-    write_comps_cache(cache["comps"], source=f"excel-sync {excel_path.split('/')[-1]}")
-    save_state({"last_mtime": mtime, "last_sync_utc": __import__("datetime").datetime.utcnow().isoformat(),
-                "base_jobs_processed": len(by_base), "enriched": enriched, "added": added})
-
-    return {
-        "skipped_mtime_unchanged": False,
-        "excel_mtime": mtime,
-        "excel_path": excel_path,
-        "base_jobs_processed": len(by_base),
-        "enriched": enriched,
-        "added": added,
-        "total_comps_after": len(cache["comps"]),
-    }
-
-
-if __name__ == "__main__":
-    result = run(force="--force" in sys.argv)
-    print(json.dumps(result, indent=2, default=str))
+      
