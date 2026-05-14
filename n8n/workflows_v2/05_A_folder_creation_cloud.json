@@ -305,13 +305,18 @@
           }
         ]
       ]
+    },
+    "Log to Automation Log": {
+      "main": [
+        []
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "aceb10ac-13ec-497f-8cdf-1a4e181ab119",
+  "versionId": "2f4dcbc6-96d2-4a49-8d92-07d952801f53",
   "tags": [
     {
       "name": "ks-automation"

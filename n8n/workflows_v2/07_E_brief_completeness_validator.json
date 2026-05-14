@@ -1,0 +1,258 @@
+{
+  "name": "KS E \u2014 Brief Completeness Validator (v2.1.9 webhook)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ks-e-brief-completeness",
+        "authentication": "none",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "df3d4ffa-8601-4f19-bcc7-18e9fb86d43d",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "d6fef3e0-51b6-4b16-b46d-4ede7d6b5f76"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.data.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "832e0e72-023c-4761-b543-abdee1559952",
+      "name": "Get Brief Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account",
+          "id": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Check brief completeness against required field list\nconst props = $input.first().json.properties || {};\nfunction richText(p) { return ((p && p.rich_text) || []).map(t => t.plain_text).join('').trim(); }\nfunction selectVal(p) { return (p && p.select && p.select.name) || ''; }\nconst required = {\n  'City':           richText(props.City),\n  'State':          richText(props.State),\n  'Jurisdiction':   richText(props.Jurisdiction),\n  'ICC Code Year':  selectVal(props['ICC Code Year']),\n  'Project Street': richText(props['Project Street']),\n};\nconst missing = Object.entries(required).filter(([k,v]) => !v).map(([k]) => k);\nreturn [{\n  json: {\n    page_id: $input.first().json.id,\n    complete: missing.length === 0,\n    missing: missing,\n    missing_count: missing.length,\n  }\n}];"
+      },
+      "id": "fbe5c5fe-4fa6-4b41-b33f-dd75e344ef04",
+      "name": "Check required fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cd82c5ec-ef02-459c-b3d3-3ed0a5771234",
+              "leftValue": "={{ $json.complete }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "10fa66d7-5ab9-4d88-80b3-9da41a45c895",
+      "name": "Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"E \u00b7 Brief complete \u2014 ready to flip Status\" } }] },\n    \"Job\": { select: { name: \"E\" } },\n    \"Outcome\": { select: { name: \"Success\" } },\n    \"Brief\": { relation: [{ id: $(\"Get Brief Page\").item.json.id }] }\n  }\n}) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi"
+      },
+      "id": "ac5144e9-ba26-4c93-9577-3499293517c8",
+      "name": "Log: brief complete",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account",
+          "id": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: (\"E \u00b7 Brief missing \" + $json.missing_count + \" field(s)\") } }] },\n    \"Job\": { select: { name: \"E\" } },\n    \"Outcome\": { select: { name: \"Skipped\" } },\n    \"Brief\": { relation: [{ id: $(\"Get Brief Page\").item.json.id }] },\n    \"Details\": { rich_text: [{ type: \"text\", text: { content: (\"Missing: \" + ($json.missing || []).join(\", \")) } }] }\n  }\n}) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi"
+      },
+      "id": "fe355f41-91eb-4160-b644-0f73c479c80f",
+      "name": "Log: brief incomplete",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        380
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account",
+          "id": ""
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Brief Page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Get Brief Page": {
+      "main": [
+        [
+          {
+            "node": "Check required fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Check required fields": {
+      "main": [
+        [
+          {
+            "node": "Complete?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Complete?": {
+      "main": [
+        [
+          {
+            "node": "Log: brief complete",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log: brief incomplete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "fb177e11-7162-4a94-8486-57cf00251786",
+  "tags": [
+    {
+      "name": "ks-automation"
+    },
+    {
+      "name": "v2.1.9"
+    },
+    {
+      "name": "webhook"
+    },
+    {
+      "name": "validation"
+    }
+  ]
+}

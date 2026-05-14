@@ -1,0 +1,265 @@
+{
+  "name": "KS F \u2014 Stale Brief Reminder (v2.1.9 cron)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 9,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "72f312be-b0ef-4216-be30-38b0b58da253",
+      "name": "Daily 9am Cron",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/data_sources/6b64658f-5fb3-4329-b02c-3ac3cb8a0828/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  page_size: 100,\n  filter: {\n    and: [\n      { timestamp: \"created_time\", created_time: { before: $now.minus({days: 5}).toISO() } },\n      { property: \"Ready to Render\", checkbox: { equals: false } }\n    ]\n  }\n}) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi"
+      },
+      "id": "adfa189e-c426-47c1-af41-9501fa991909",
+      "name": "Query stale briefs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account",
+          "id": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Split query results into separate items\nconst results = ($input.first().json.results || []);\nif (results.length === 0) return [{ json: { _empty: true } }];\nreturn results.map(r => ({ json: r }));"
+      },
+      "id": "31178ee0-2925-45ac-915d-485b3fb88fd6",
+      "name": "Split into items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "ceb45b3d-0ec7-4b39-805a-767d70204aa7",
+              "leftValue": "={{ !$json._empty }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "caada8b1-8c8d-4b0c-bfd1-69334b53a355",
+      "name": "Has stale briefs?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"F \u00b7 Stale brief reminder\" } }] },\n    \"Job\": { select: { name: \"F\" } },\n    \"Outcome\": { select: { name: \"Skipped\" } },\n    \"Brief\": { relation: [{ id: $json.id }] },\n    \"Details\": { rich_text: [{ type: \"text\", text: { content: (\"Brief Draft >5d (created \" + ($json.created_time || \"unknown\") + \")\") } }] }\n  }\n}) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi"
+      },
+      "id": "1804aade-fb2d-4ec1-9bc2-283d73635366",
+      "name": "Log stale brief",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        240
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account",
+          "id": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2025-09-03"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  parent: { type: \"data_source_id\", data_source_id: \"04d7aa20-eb8d-4d51-b302-25fb4eaaf26e\" },\n  properties: {\n    \"Log Entry\": { title: [{ type: \"text\", text: { content: \"F \u00b7 Daily check \u2014 no stale briefs\" } }] },\n    \"Job\": { select: { name: \"F\" } },\n    \"Outcome\": { select: { name: \"Success\" } }\n  }\n}) }}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi"
+      },
+      "id": "c1fd797c-1d38-4399-981c-3659ae4410b7",
+      "name": "Log: no stale briefs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        380
+      ],
+      "credentials": {
+        "notionApi": {
+          "name": "Notion account",
+          "id": ""
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 9am Cron": {
+      "main": [
+        [
+          {
+            "node": "Query stale briefs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Query stale briefs": {
+      "main": [
+        [
+          {
+            "node": "Split into items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Split into items": {
+      "main": [
+        [
+          {
+            "node": "Has stale briefs?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Has stale briefs?": {
+      "main": [
+        [
+          {
+            "node": "Log stale brief",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log: no stale briefs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "6b2f19e8-5c2f-4b64-bd2f-0a7b8b698ef8",
+  "tags": [
+    {
+      "name": "ks-automation"
+    },
+    {
+      "name": "v2.1.9"
+    },
+    {
+      "name": "cron"
+    },
+    {
+      "name": "reminder"
+    }
+  ]
+}

@@ -50,6 +50,12 @@ NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 NOTION_API = "https://api.notion.com/v1"
 NOTION_VERSION = "2022-06-28"
 
+# Notion data source IDs (per CLAUDE.md)
+PROJECTS_DS_ID  = "262b73dc-460e-8137-b3bb-000b62103b15"
+BRIEFS_DS_ID    = "6b64658f-5fb3-4329-b02c-3ac3cb8a0828"
+FEE_LINES_DS_ID = "e05398ef-c999-477b-9420-3ccd4976730a"
+
+
 GRAPH_CLIENT_ID = os.environ["GRAPH_CLIENT_ID"]
 GRAPH_CLIENT_SECRET = os.environ["GRAPH_CLIENT_SECRET"]
 GRAPH_TENANT_ID = os.environ["GRAPH_TENANT_ID"]
@@ -220,6 +226,48 @@ def parse_contact(page: Dict[str, Any]) -> Dict[str, Any]:
         "Phone (Mobile)": _text_plain(props.get("Phone (Mobile)")),
         "Role": _text_plain(props.get("Role")),
     }
+
+def parse_brief(page: Dict[str, Any]) -> Dict[str, Any]:
+    """Flatten a Proposal Brief page into the overlay dict the renderer expects.
+    Per 2026-04-22 schema rework: City, State, ICC Code Year, Jurisdiction,
+    Project Street, Reimbursables Treatment all live on the Brief now."""
+    props = page.get("properties", {})
+    return {
+        "id": page.get("id"),
+        "City": _text_plain(props.get("City")).strip(),
+        "State": _text_plain(props.get("State")).strip(),
+        "ICC Code Year": _select_name(props.get("ICC Code Year")),
+        "Jurisdiction": _text_plain(props.get("Jurisdiction")).strip(),
+        "Project Street": _text_plain(props.get("Project Street")).strip(),
+        "Reimbursables Treatment": _select_name(props.get("Reimbursables Treatment")),
+        "Project Type": _select_name(props.get("Project Type")),  # rollup, display only
+        "Approx. Structural SF": _number(props.get("Approx. Structural SF")),
+        "Scope Bullets": [],  # populated by brief body parser later
+        "project_ids": _relation_ids(props.get("Parent item")) or _relation_ids(props.get("Project")),
+        "Status": _status_name(props.get("Status")) or _select_name(props.get("Status")),
+    }
+
+
+def fetch_brief_for_project(project_page_id: str) -> Optional[Dict[str, Any]]:
+    """Find the Proposal Brief linked to this project, if any. Returns parsed brief dict."""
+    page = notion_get_page(project_page_id)
+    brief_ids = _relation_ids(page.get("properties", {}).get("Proposal Brief"))
+    if not brief_ids:
+        return None
+    brief_page = notion_get_page(brief_ids[0])
+    return parse_brief(brief_page)
+
+
+def fetch_project_for_brief(brief_page: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Find the Project linked to this brief via Parent item / Project relation."""
+    props = brief_page.get("properties", {})
+    proj_ids = _relation_ids(props.get("Parent item")) or _relation_ids(props.get("Project"))
+    if not proj_ids:
+        return None
+    project_page = notion_get_page(proj_ids[0])
+    return parse_project(project_page)
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +450,7 @@ def _idempotency_skip(project: Dict[str, Any], folder_name: str) -> bool:
     return False
 
 
-def do_render_proposal(project: Dict[str, Any]) -> Dict[str, str]:
+def do_render_proposal(project: Dict[str, Any], brief: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
     """Render contract + memo, upload to OneDrive. Returns paths of uploaded files."""
     if not project["client_ids"]:
         raise HTTPException(status_code=422, detail="project has no Client relation")
@@ -433,6 +481,12 @@ def do_render_proposal(project: Dict[str, Any]) -> Dict[str, str]:
 
     if _idempotency_skip(project, folder_name):
         return {"status": "already_rendered", "folder_name": folder_name}
+
+    # Auto-fetch brief if not passed in
+    if brief is None:
+        brief = fetch_brief_for_project(project["page_id"])
+        if brief:
+            log.info("auto-fetched brief %s for project %s", brief["id"], project["page_id"])
 
     # Build dicts in the shape render_proposal_package expects.
     project_data = {
@@ -496,6 +550,7 @@ def do_render_proposal(project: Dict[str, Any]) -> Dict[str, str]:
 
         result = render_proposal_package(
             project_data, client_data, contact_data, project_for_memo,
+            brief=brief,
         )
         if "error" in result:
             raise HTTPException(status_code=500, detail=result["error"])
@@ -606,3 +661,66 @@ async def process_raw(request: Request,
         raise HTTPException(status_code=400, detail="no page_id in payload")
     return process(ProcessRequest(page_id=page_id, source="notion_direct"),
                    x_kingdom_auth=x_kingdom_auth)
+
+
+class RenderContractRequest(BaseModel):
+    brief_id: str
+    source: Optional[str] = "webhook"
+
+
+class RenderContractResponse(BaseModel):
+    ok: bool
+    page_id: str
+    brief_id: str
+    job_number: Optional[str] = None
+    folder_name: Optional[str] = None
+    contract_path: Optional[str] = None
+    memo_path: Optional[str] = None
+    message: str = ""
+    skip_reason: Optional[str] = None
+
+
+@app.post("/render-contract", response_model=RenderContractResponse)
+def render_contract(req: RenderContractRequest,
+                    x_kingdom_auth: Optional[str] = Header(default=None)):
+    """Render contract from a Brief ID. Used by n8n workflow 06.
+    Fetches Brief → Project, then calls do_render_proposal with brief overlay."""
+    if SHARED_SECRET and x_kingdom_auth != SHARED_SECRET:
+        raise HTTPException(status_code=401, detail="bad shared secret")
+
+    brief_page = notion_get_page(req.brief_id)
+    brief = parse_brief(brief_page)
+
+    # Find linked project
+    project = fetch_project_for_brief(brief_page)
+    if not project:
+        return RenderContractResponse(
+            ok=False, page_id="", brief_id=req.brief_id,
+            skip_reason="brief has no linked project (Parent item relation empty)",
+            message="cannot render — brief not linked to a project",
+        )
+
+    if not project["job_number"]:
+        return RenderContractResponse(
+            ok=False, page_id=project["page_id"], brief_id=req.brief_id,
+            skip_reason="project name does not start with 8-digit job number",
+            message="skipped",
+        )
+
+    if not project["folder_checked"]:
+        return RenderContractResponse(
+            ok=False, page_id=project["page_id"], brief_id=req.brief_id,
+            job_number=project["job_number"],
+            skip_reason="project folder not yet created",
+            message="cannot render — folder missing",
+        )
+
+    result = do_render_proposal(project, brief=brief)
+    return RenderContractResponse(
+        ok=True, page_id=project["page_id"], brief_id=req.brief_id,
+        job_number=project["job_number"],
+        folder_name=result.get("folder_name"),
+        contract_path=result.get("contract_path"),
+        memo_path=result.get("memo_path"),
+        message=f"contract render {result.get('status','ok')}",
+    )

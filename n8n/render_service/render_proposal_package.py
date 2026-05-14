@@ -1,9 +1,14 @@
 """
-Render a full proposal package (contract + fee memo) for a project and drop
-both files into the project's OneDrive Contracts folder.
+Render the Kingdom Structural contract .docx for a project and drop it into
+the project's OneDrive Contracts folder.
 
-This is the function the scheduled task will call when a project transitions
-to "Proposal Requested" status.
+Per v2.1 Change Order (2026-04-22): Fee Analysis Memo rendering has been
+removed from this pipeline. Only the contract .docx is produced. Fee memo
+code is preserved under _archive/ for future revival.
+
+This is the function the "Contract Render" scheduled task (Job B) calls
+after the Admin approves a Brief (Brief.Status = "Approved" AND
+Brief.Ready to Render = true).
 
 Folder/naming conventions match Kingdom Structural's existing OneDrive layout:
     _Projects/
@@ -11,13 +16,13 @@ Folder/naming conventions match Kingdom Structural's existing OneDrive layout:
             {KS_Job_Number} {Project Name} - {City, State}/
                 Contracts/
                     {KS_Job_Number} KS Structural Contract - {Client} - {Project} - {YY.MM.DD}.docx
-                    {KS_Job_Number} Fee Analysis Memo - {Project} - {YY.MM.DD}.docx
                     NOT USED/           (legacy — partners put abandoned drafts here)
                     Signed Contract/    (legacy — signed contracts land here)
 """
 import os
 import sys
 import re
+import time
 from datetime import date
 
 # Pull in the existing render functions (scripts live alongside this file)
@@ -29,6 +34,8 @@ from render_from_notion import (
     expand_scope_bullets,
     apply_reimbursables_treatment,   # v1 (legacy template) — kept for fallback
     cleanup_whitespace_artifacts,
+    clear_highlight_on_resolved_runs,  # v2.1.2: strip highlight on resolved fields
+    linkify_emails,                    # v2.1.8: auto-hyperlink email addresses
     resolve_scope_bullets,
     merge_brief_into_project,
     # v2 template pipeline (2026-04-22)
@@ -40,8 +47,6 @@ from render_from_notion import (
     render_fee_schedule,
     TEMPLATE,
 )
-from fee_memo import render_fee_memo as render_memo_base, COMPS
-
 from docx import Document
 import shutil
 
@@ -146,14 +151,31 @@ def find_project_folder(ks_job_number, project_name_short):
     """
     Find the on-disk project folder matching the KS job number.
     Returns the full path or None.
+
+    Year search order: the year implied by the number prefix first ("26…" →
+    2026), then every existing sibling year under _Projects/ as a fallback
+    in case a folder was filed under an unexpected year directory.
     """
-    for year in ["2024", "2025", "2026", "2027"]:
+    # Primary: use the 2-digit prefix (handles 2028, 2029, etc., not just 24-27)
+    years_to_check: list[str] = []
+    if ks_job_number[:2].isdigit():
+        years_to_check.append("20" + ks_job_number[:2])
+    # Fallback: any other year dirs that actually exist under _Projects/
+    try:
+        for entry in sorted(os.listdir(ONEDRIVE_ROOT)):
+            if entry.isdigit() and len(entry) == 4 and entry not in years_to_check:
+                years_to_check.append(entry)
+    except OSError:
+        pass
+
+    for year in years_to_check:
         year_dir = os.path.join(ONEDRIVE_ROOT, year)
         if not os.path.isdir(year_dir):
             continue
         for name in os.listdir(year_dir):
-            # Match on full 8-digit job number at the start of folder name
-            if name.startswith(ks_job_number + " "):
+            # Match on full 8-digit job number at the start of folder name.
+            # Accept both "{num} Name - City, ST" (legacy) and "{num} - Name - City, ST" (v2.1.2).
+            if name.startswith(ks_job_number + " ") or name.startswith(ks_job_number + "-"):
                 return os.path.join(year_dir, name)
     return None
 
@@ -237,92 +259,163 @@ def render_contract(project_data, client_data, contact_data, contracts_dir,
     filename = sanitize(filename)
     out_path = os.path.join(contracts_dir, filename)
 
-    shutil.copyfile(TEMPLATE, out_path)
-    doc = Document(out_path)
+    # v2.1.8: never overwrite a previously rendered contract. If a file with
+    # the same base name already exists in the Contracts folder, append the
+    # lowest unused 'v{N}' suffix (v2, v3, v4 ...). The first render keeps
+    # the un-suffixed name; re-renders accumulate as separate files so the
+    # engineer can compare versions and nothing is destroyed or lost.
+    if os.path.exists(out_path):
+        base, ext = os.path.splitext(filename)
+        v = 2
+        while True:
+            candidate_name = f"{base} v{v}{ext}"
+            candidate_path = os.path.join(contracts_dir, candidate_name)
+            if not os.path.exists(candidate_path):
+                filename = candidate_name
+                out_path = candidate_path
+                break
+            v += 1
 
-    # Parse Brief body for body-driven content. Safe when brief_body=None
-    # (returns empty lists; renderer falls back gracefully).
-    parsed = parse_brief_body(brief_body or "")
-
-    # 1. Reimbursables variant — body checkbox wins; Project.Reimbursables
-    #    Treatment is legacy fallback.
-    treatment = parsed.get("reimbursables") or project_data.get("Reimbursables Treatment")
-    apply_reimbursables_v2(doc, treatment or "Standard")
-
-    # 2. SSI paragraph — include by default. Body-checkbox "Special structural
-    #    inspections shall be excluded" suppresses it. The scope bullet itself
-    #    still appears (separate from the SSI billing paragraph).
-    ssi_excluded = any(
-        "special structural inspections shall be excluded" in i.get("text", "").lower()
-        for i in parsed.get("scope_of_services", [])
-    )
-    handle_ssi_paragraph(doc, include=not ssi_excluded)
-
-    # 3. Scope of Services bullets from Brief body (preferred) or fallback.
-    scope_items = parsed.get("scope_of_services") or []
-    if scope_items:
-        bullets = [i["text"] for i in scope_items]
+    # Retry the template copy when the destination is locked. Causes we've
+    # actually seen: (a) Word has the previous render open with an exclusive
+    # lock, (b) OneDrive sync handler is mid-write to that path, (c) the
+    # Contracts folder is being moved/restored by OneDrive Files-on-Demand.
+    # Total back-off ~16s (1+2+3+4+5s) is generous enough to outlast a
+    # transient OneDrive lock without dragging out a real Word-is-open case.
+    # If it ultimately fails, raise with a clear, actionable error.
+    last_err = None
+    for attempt in range(5):
+        try:
+            shutil.copyfile(TEMPLATE, out_path)
+            break
+        except (PermissionError, OSError) as e:
+            last_err = e
+            time.sleep(attempt + 1)   # 1s, 2s, 3s, 4s, 5s
     else:
-        bullets = resolve_scope_bullets(project_data)
-    expand_scope_bullets(doc, bullets)
+        raise PermissionError(
+            f"Could not write contract to {out_path!r} after 5 retries. "
+            f"Most common cause: the file is open in Word — close it and re-run. "
+            f"Last OS error: {last_err}"
+        )
 
-    # 4. Fee Schedule — remove unchecked rows, format included rows, sum total.
-    if fee_lines:
-        render_fee_schedule(doc, fee_lines)
+    # v2.1.8: tracking flag for partial-render cleanup. If anything between
+    # the template copy and doc.save() raises, the file at out_path is just
+    # a pure (un-rendered) template copy — delete it so OneDrive doesn't
+    # accumulate empty 'v2/v3/v4...' contracts. Exception is re-raised so
+    # Job B logs and surfaces it.
+    save_succeeded = False
+    try:
+        doc = Document(out_path)
 
-    # 5. Basic Services paragraph — comma-join checked items.
-    basic_para = build_basic_services_paragraph(parsed)
-    handle_basic_services_paragraph(doc, basic_para)
+        # Parse Brief body for body-driven content. Safe when brief_body=None
+        # (returns empty lists; renderer falls back gracefully).
+        parsed = parse_brief_body(brief_body or "")
 
-    # 6. Simple placeholder substitution (must be last so runs are stable
-    #    after any prior manipulations).
-    fill_placeholders(doc, merge)
+        # 1. Reimbursables variant — body checkbox wins; Project.Reimbursables
+        #    Treatment is legacy fallback.
+        treatment = parsed.get("reimbursables") or project_data.get("Reimbursables Treatment")
+        apply_reimbursables_v2(doc, treatment or "Standard")
 
-    # 7. Cleanup stray whitespace around punctuation.
-    cleanup_whitespace_artifacts(doc)
-    doc.save(out_path)
+        # 2. SSI paragraph — v2.1.8: include ONLY when the Fee Schedule's
+        #    'Special Structural Inspections' row is checked Include. With the
+        #    v2.1.7 formula, that checkbox auto-derives from Amount > 0, so
+        #    the rule simplifies to: SSI paragraph appears iff the engineer
+        #    entered a non-zero SSI fee on the Brief's Fee Schedule. If
+        #    unchecked (no fee), the paragraph is removed from the contract.
+        ssi_included = any(
+            (fl.get("service") or "").strip().lower() == "special structural inspections"
+            and fl.get("include")
+            for fl in (fee_lines or [])
+        )
+        handle_ssi_paragraph(doc, include=ssi_included)
+
+        # 3. Scope of Services bullets from Brief body (preferred) or fallback.
+        scope_items = parsed.get("scope_of_services") or []
+        if scope_items:
+            bullets = [i["text"] for i in scope_items]
+        else:
+            bullets = resolve_scope_bullets(project_data)
+        # v2.1.8: every contract closes the scope list with a hard exclusion
+        # statement so the bounds of the engagement are explicit. Always
+        # appended as the LAST bullet, regardless of source. Idempotent — if
+        # an engineer happens to type this same line into the Brief, we
+        # de-dupe so it doesn't appear twice.
+        STATIC_EXCLUSION_BULLET = "Tasks not listed in this scope of work are excluded."
+        bullets = [b for b in bullets if b.strip().rstrip(".").lower()
+                   != STATIC_EXCLUSION_BULLET.rstrip(".").lower()]
+        bullets.append(STATIC_EXCLUSION_BULLET)
+        expand_scope_bullets(doc, bullets)
+
+        # 4. Fee Schedule — remove unchecked rows, format included rows, sum total.
+        #    v2.1.8: when Reimbursables treatment is 'Digital Only' or
+        #    'Included in Fee', the 'Reimbursables' row gets removed from
+        #    the fee table and the '+ Reimbursables' suffix is dropped from
+        #    the TOTAL row. Standard treatment keeps both.
+        include_reimbursables = (treatment or "Standard").strip().lower() == "standard"
+        if fee_lines:
+            render_fee_schedule(doc, fee_lines,
+                                include_reimbursables=include_reimbursables)
+
+        # 5. Basic Services paragraph — comma-join checked items.
+        basic_para = build_basic_services_paragraph(parsed)
+        handle_basic_services_paragraph(doc, basic_para)
+
+        # 6. Simple placeholder substitution (must be last so runs are stable
+        #    after any prior manipulations).
+        fill_placeholders(doc, merge)
+
+        # 7. Cleanup stray whitespace around punctuation.
+        cleanup_whitespace_artifacts(doc)
+
+        # 8. Clear highlighting on every run that holds a resolved value.
+        #    Leave highlight intact on any run whose text still contains
+        #    '<<FILL IN:' so engineers visually spot the data gaps before
+        #    sending the contract. (v2.1.2 spec)
+        clear_highlight_on_resolved_runs(doc)
+
+        # 9. v2.1.8: convert plain-text email addresses into Word hyperlinks
+        #    (mailto:foo@bar.com), styled blue + underlined. Wrapped in its
+        #    own try/except so a bug in the linkifier degrades gracefully —
+        #    the contract still saves with everything else applied; emails
+        #    just appear as plain text on that one render.
+        try:
+            linkify_emails(doc)
+        except Exception as _linkify_err:
+            import logging as _lg
+            _lg.getLogger("render").warning(
+                "linkify_emails failed (non-fatal): %s: %s — emails on "
+                "this contract will render as plain text.",
+                type(_linkify_err).__name__, _linkify_err,
+            )
+
+        doc.save(out_path)
+        save_succeeded = True
+    finally:
+        if not save_succeeded:
+            try:
+                if os.path.exists(out_path):
+                    os.remove(out_path)
+            except OSError:
+                pass
+
     return out_path, merge
 
 
-def render_fee_memo(project_for_memo, contracts_dir, today=None):
-    """Render the fee analysis memo .docx into the Contracts folder."""
-    today = today or date.today()
-    date_short = today.strftime("%y.%m.%d")
-    job = project_for_memo.get("ks_job_number", "")
-    proj_full = project_for_memo.get("project_name", "")
-
-    # Use the same truncated project name the contract uses so the two files
-    # sit side-by-side with matching short names and stay under MAX_PATH.
-    # City/state aren't passed through the memo dict, so derive budget with
-    # empty loc_suffix — the folder has already been created by the caller.
-    _, proj_short = project_folder_name(
-        job, proj_full,
-        project_for_memo.get("city", project_for_memo.get("location", "")),
-        "",
-    )
-
-    # Filename match contract style
-    filename = f"{job} Fee Analysis Memo - {proj_short} - {date_short}.docx"
-    filename = sanitize(filename)
-
-    # render_memo_base writes directly to the given filename (no rename needed).
-    # This avoids the OneDrive permission issue where shutil.move's unlink-first
-    # behavior fails on existing files.
-    target, stats_d, tiers = render_memo_base(project_for_memo, contracts_dir, filename=filename)
-    return target, stats_d, tiers
-
-
-def render_proposal_package(project_data, client_data, contact_data,
-                             project_for_memo, today=None, engineer=None,
+def render_contract_package(project_data, client_data, contact_data,
+                             today=None, engineer=None,
                              brief=None, brief_body=None, fee_lines=None):
     """
     Full pipeline: find project folder, ensure Contracts subfolder exists,
-    render contract + memo, return a dict of paths + analytics.
+    render the contract, return a dict of paths.
 
-    v2 parameters (2026-04-22):
+    v2.1 (2026-04-22): Fee memo rendering removed from this pipeline per
+    the v2.1 Change Order. Only the contract .docx is produced.
+
+    Parameters:
       - `brief`      — dict of Brief properties (overlays Project)
       - `brief_body` — raw markdown string of the Brief page body
-      - `fee_lines`  — list of fee-line dicts from Contract Fee Lines DB
+      - `fee_lines`  — list of fee-line dicts from the Brief's child
+                       Fee Schedule DB
     """
     ks_job = project_data.get("Project Name", "")
     # Extract the 8-digit job number from project name ("26102144 - General Metal Construction PEMB")
@@ -348,22 +441,23 @@ def render_proposal_package(project_data, client_data, contact_data,
         today=today, engineer=engineer, brief=brief,
         brief_body=brief_body, fee_lines=fee_lines,
     )
-    memo_path, stats_d, tiers = render_fee_memo(project_for_memo, contracts_dir, today=today)
 
     return {
         "project_folder": folder,
         "contracts_dir": contracts_dir,
         "contract": contract_path,
-        "memo": memo_path,
         "merge_data": merge_data,
-        "memo_stats": stats_d,
-        "memo_tiers": tiers,
         "template_populate": populate_stats,
     }
 
 
+# Backwards-compat alias. Old callers that still say render_proposal_package()
+# will keep working. New code should use render_contract_package().
+render_proposal_package = render_contract_package
+
+
 # ===================================================================
-# Test: run against real Trevor Pan PEMB project
+# Test: run against real Trevor Pan PEMB project (contract-only, v2.1)
 # ===================================================================
 if __name__ == "__main__":
     project_general_metal = {
@@ -397,21 +491,9 @@ if __name__ == "__main__":
         "Phone (Mobile)": "480.277.3499",
         "Role": "",
     }
-    project_for_memo = {
-        "project_name": "General Metal Construction PEMB",
-        "ks_job_number": "26102144",
-        "project_type": "PEMB",
-        "approx_sf": 12000,
-        "jurisdiction": "Phoenix",
-        "location": "Phoenix, AZ",
-        "scope_description": project_general_metal["Scope Description"],
-        "partner": "CV",
-        "client_company_name": "Trevor Pan Architects",
-        "engineering_status": "Proposal Sent",
-    }
 
-    result = render_proposal_package(
-        project_general_metal, client_trevor_pan, contact_trevor, project_for_memo
+    result = render_contract_package(
+        project_general_metal, client_trevor_pan, contact_trevor
     )
     if "error" in result:
         print(f"ERROR: {result['error']}")
@@ -419,5 +501,3 @@ if __name__ == "__main__":
         print(f"Project folder: {result['project_folder']}")
         print(f"Contracts dir:  {result['contracts_dir']}")
         print(f"Contract:       {result['contract']}")
-        print(f"Fee memo:       {result['memo']}")
-        print(f"\nTier recommendation: {result['memo_tiers']}")

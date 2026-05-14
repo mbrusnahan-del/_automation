@@ -540,23 +540,100 @@ def fill_placeholders(doc, data):
                 for para in cell.paragraphs:
                     process_paragraph(para)
     # Headers and footers live in doc.sections[*].header / .footer
+    # Process BOTH paragraphs AND tables — letterhead logos + project info
+    # are commonly laid out as a table inside the header (logo in one cell,
+    # project number / project name in the other). Before 2026-04-24 the
+    # table branch was missing, so those placeholders rendered as literal
+    # `{{ks_job_number}}` text in the header band.
+    def _process_container(container):
+        if container is None:
+            return
+        try:
+            for para in container.paragraphs:
+                process_paragraph(para)
+            for table in container.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            process_paragraph(para)
+                        # Recurse into nested tables (some letterheads nest)
+                        for inner in cell.tables:
+                            for irow in inner.rows:
+                                for icell in irow.cells:
+                                    for ipara in icell.paragraphs:
+                                        process_paragraph(ipara)
+        except Exception:
+            pass
+
     for section in doc.sections:
         for header in (section.header, section.first_page_header, section.even_page_header):
-            if header is None:
-                continue
-            try:
-                for para in header.paragraphs:
-                    process_paragraph(para)
-            except Exception:
-                pass
+            _process_container(header)
         for footer in (section.footer, section.first_page_footer, section.even_page_footer):
-            if footer is None:
-                continue
-            try:
-                for para in footer.paragraphs:
-                    process_paragraph(para)
-            except Exception:
-                pass
+            _process_container(footer)
+
+
+def clear_highlight_on_resolved_runs(doc):
+    """
+    After fill_placeholders() has swapped {{ placeholders }} with real values,
+    walk every run in the document. If the run's text does NOT contain a
+    '<<FILL IN:' marker, strip its highlight color and shading. If it DOES
+    contain the marker, leave formatting intact so the gap stays highlighted
+    in the rendered contract.
+
+    Rule, per v2.1.2 spec:
+      Resolved value (non-'<<FILL IN:')  → highlight removed, clean text
+      Fallback placeholder ('<<FILL IN:') → highlight preserved so the
+                                            engineer spots the data gap
+
+    Touches only two run-level formats: `<w:highlight>` and `<w:shd>`.
+    Preserves bold, italic, size, color, and everything else.
+    """
+    def strip_run(run):
+        if "<<FILL IN:" in (run.text or ""):
+            return
+        # Highlight color (the <w:highlight w:val="..."/> element)
+        try:
+            run.font.highlight_color = None
+        except Exception:
+            pass
+        # Shading (<w:shd .../> — background fill, different from highlight)
+        rPr = run._r.find(qn('w:rPr'))
+        if rPr is not None:
+            for shd in rPr.findall(qn('w:shd')):
+                rPr.remove(shd)
+
+    def _strip_container(container):
+        if container is None:
+            return
+        try:
+            for p in container.paragraphs:
+                for r in p.runs:
+                    strip_run(r)
+            for table in container.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for p in cell.paragraphs:
+                            for r in p.runs:
+                                strip_run(r)
+        except Exception:
+            pass
+
+    for p in doc.paragraphs:
+        for r in p.runs:
+            strip_run(r)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    for r in p.runs:
+                        strip_run(r)
+    # v2.1.6: also strip header/footer highlights. Same rule applies —
+    # yellow stays only where text still shows '<<FILL IN:'.
+    for section in doc.sections:
+        for header in (section.header, section.first_page_header, section.even_page_header):
+            _strip_container(header)
+        for footer in (section.footer, section.first_page_footer, section.even_page_footer):
+            _strip_container(footer)
 
 
 def cleanup_whitespace_artifacts(doc):
@@ -564,6 +641,14 @@ def cleanup_whitespace_artifacts(doc):
     After template edits (like removing instructional text runs), stray
     whitespace can end up adjacent to punctuation: "work ." / "intervals ." /
     "email ..". Clean these by walking every paragraph's joined text.
+
+    v2.1.8: also strips leading whitespace from the first non-empty run of
+    each paragraph. The contract template has a literal space before the
+    {{date}} placeholder in the top-left header (' {{date}}'), which after
+    substitution would render as ' April 30, 2026'. Stripping the leading
+    space on first runs fixes that — and is generally safe because Word
+    paragraph indentation is normally driven by paragraph styles, not
+    leading whitespace inside a run.
     """
     import re as _re
     patterns = [
@@ -587,14 +672,154 @@ def cleanup_whitespace_artifacts(doc):
             if r.text:
                 for pat, repl in patterns:
                     r.text = pat.sub(repl, r.text)
+        # v2.1.8: strip leading whitespace from the first non-empty run.
+        # Find the first run with any non-whitespace content; if that run's
+        # text starts with whitespace, lstrip just that portion.
+        for r in runs:
+            if r.text and r.text.strip():
+                if r.text != r.text.lstrip():
+                    r.text = r.text.lstrip()
+                break  # only the first non-empty run
 
     for p in doc.paragraphs:
         clean_paragraph(p)
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Email → hyperlink conversion (v2.1.8)
+# ────────────────────────────────────────────────────────────────────────
+
+_EMAIL_PATTERN = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}')
+
+
+def linkify_emails(doc):
+    """Walk every paragraph + table cell and convert plain-text email
+    addresses into proper Word hyperlinks ('mailto:foo@bar.com'), styled
+    blue + underlined (Word's default Hyperlink color #0563C1).
+
+    Idempotent: emails already wrapped in <w:hyperlink> are skipped, so
+    re-runs on a partially-linkified doc don't double-wrap. Safe to run
+    multiple times.
+
+    Why this is needed: the template has placeholders like
+    '{{client_email}}' in plain text runs. After fill_placeholders does
+    text substitution, those runs contain a bare email string with no
+    color, no underline, no hyperlink. Word normally auto-converts emails
+    to hyperlinks only when you type a space/Enter after them — which
+    never happens during programmatic substitution. This function
+    performs that conversion explicitly after the substitution pass.
+    """
+    from docx.oxml.shared import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.opc.constants import RELATIONSHIP_TYPE
+    from copy import deepcopy
+
+    def _make_hyperlink_element(part, email, source_rPr=None):
+        """Build a <w:hyperlink> element wrapping a styled <w:r> for the
+        given email address. If a source run-properties element is given,
+        copy its formatting (font, size, etc.) and add color+underline on
+        top — so the email inherits the surrounding paragraph's font."""
+        r_id = part.relate_to(
+            f"mailto:{email}", RELATIONSHIP_TYPE.HYPERLINK, is_external=True
+        )
+        hyperlink = OxmlElement('w:hyperlink')
+        hyperlink.set(qn('r:id'), r_id)
+
+        new_run = OxmlElement('w:r')
+        rPr = deepcopy(source_rPr) if source_rPr is not None else OxmlElement('w:rPr')
+
+        # Strip any existing color/underline so our values win
+        for tag in ('w:color', 'w:u'):
+            existing = rPr.find(qn(tag))
+            if existing is not None:
+                rPr.remove(existing)
+
+        color = OxmlElement('w:color')
+        color.set(qn('w:val'), '0563C1')   # Word's default Hyperlink color
+        rPr.append(color)
+        u = OxmlElement('w:u')
+        u.set(qn('w:val'), 'single')
+        rPr.append(u)
+        new_run.append(rPr)
+
+        t = OxmlElement('w:t')
+        t.text = email
+        t.set(qn('xml:space'), 'preserve')
+        new_run.append(t)
+
+        hyperlink.append(new_run)
+        return hyperlink
+
+    def _append_text_with_breaks(parent, text):
+        """Append <w:t> and <w:br/> children to `parent` (a <w:r> element),
+        translating any '\\n' in text into proper <w:br/> elements rather
+        than literal newline characters. Word ignores '\\n' inside <w:t>
+        but renders <w:br/> as a soft line break — without this conversion,
+        line-separated placeholders like '{{client_email}}\\n{{client_phone}}'
+        end up smashed onto one line after substitution + linkify."""
+        if not text:
+            return
+        parts = text.split('\n')
+        for i, part in enumerate(parts):
+            if i > 0:
+                parent.append(OxmlElement('w:br'))
+            if part:
+                t = OxmlElement('w:t')
+                t.text = part
+                t.set(qn('xml:space'), 'preserve')
+                parent.append(t)
+
+    def _process_paragraph(paragraph):
+        # Iterate a snapshot — we'll be mutating the paragraph's children
+        for run in list(paragraph.runs):
+            # Skip runs already inside a hyperlink — they're already linked
+            if run._element.getparent().tag == qn('w:hyperlink'):
+                continue
+            text = run.text or ""
+            m = _EMAIL_PATTERN.search(text)
+            if not m:
+                continue
+            email = m.group(0)
+            before = text[:m.start()]
+            after  = text[m.end():]
+
+            # Capture rPr from the original run before mutating it; we'll
+            # reuse this for the hyperlink's inner run + the tail run so
+            # font/size/etc carry through the split.
+            source_rPr_orig = run._element.find(qn('w:rPr'))
+            source_rPr_for_hl = source_rPr_orig  # _make_hyperlink_element deep-copies it
+            source_rPr_for_tail = deepcopy(source_rPr_orig) if source_rPr_orig is not None else None
+
+            # v2.1.8: instead of `run.text = before` (which collapses the
+            # run to a single <w:t> and destroys any <w:br/> elements that
+            # encoded line breaks), rebuild the original run's children
+            # ourselves so '\n' inside `before` becomes <w:br/>. Keep rPr.
+            for child in list(run._element):
+                if child.tag != qn('w:rPr'):
+                    run._element.remove(child)
+            _append_text_with_breaks(run._element, before)
+
+            part = paragraph.part
+            hyperlink = _make_hyperlink_element(part, email, source_rPr_for_hl)
+            run._element.addnext(hyperlink)
+
+            if after:
+                # Tail text in a fresh run that inherits the original's rPr.
+                # Same '\n' handling so a phone number on the line after the
+                # email stays on its own line.
+                tail_run = OxmlElement('w:r')
+                if source_rPr_for_tail is not None:
+                    tail_run.append(source_rPr_for_tail)
+                _append_text_with_breaks(tail_run, after)
+                hyperlink.addnext(tail_run)
+
+    for p in doc.paragraphs:
+        _process_paragraph(p)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for p in cell.paragraphs:
-                    clean_paragraph(p)
+                    _process_paragraph(p)
 
 
 def apply_reimbursables_treatment(doc, treatment):
@@ -744,25 +969,56 @@ def parse_brief_body(body):
 def build_basic_services_paragraph(parsed):
     """
     Compose the 'Basic services shall include …' paragraph from the list of
-    checked BASIC SERVICES items. Oxford-comma joined, with the standard
-    'not included in basic services' exclusions tail.
+    checked BASIC SERVICES items. Oxford-comma joined, with a conditional
+    exclusions tail driven by whether Construction Administration is among
+    the checked items.
+
+    Tail behavior (v2.1.7):
+      - CA SELECTED on the Brief (CA is in the contract):
+          - Keep sentence A ("Construction administration services include
+            shop drawing review and RFI responses for clarification of
+            structural designs.") — defines what CA covers.
+          - Strip the "construction administration tasks such as shop
+            drawings review, RFI response" fragment from sentence B —
+            CA tasks ARE in scope, so excluding them would contradict
+            sentence A.
+      - CA NOT SELECTED on the Brief (CA is not in the contract):
+          - Drop sentence A — no need to define a service that isn't
+            being provided.
+          - Keep sentence B intact, including the CA-tasks exclusion
+            fragment, so the contract explicitly carves CA tasks OUT
+            of basic services.
     """
     items = parsed.get("basic_services") or []
     if not items:
         return ("<<FILL IN: no Basic Services items were checked on the Brief; "
                 "check at least one before rendering>>")
+
     if len(items) == 1:
         joined = items[0]
     elif len(items) == 2:
         joined = f"{items[0]} and {items[1]}"
     else:
         joined = ", ".join(items[:-1]) + f", and {items[-1]}"
-    tail = (". Construction administration services include shop drawing review "
-            "and RFI responses for clarification of structural designs. Value "
-            "engineering, contractor design alterations, construction "
-            "administration tasks such as shop drawings review, RFI response, "
-            "site visits, and field repairs are not included in the scope of "
-            "basic services.")
+
+    ca_selected = any(
+        "construction administration" in (item or "").lower()
+        for item in items
+    )
+
+    if ca_selected:
+        # CA is in the contract: keep sentence A; strip CA-tasks fragment from B.
+        tail = (". Construction administration services include shop drawing review "
+                "and RFI responses for clarification of structural designs. "
+                "Value engineering, contractor design alterations, site visits, "
+                "and field repairs are not included in the scope of basic services.")
+    else:
+        # CA is not in the contract: drop sentence A; keep CA-tasks fragment in B.
+        tail = (". Value engineering, contractor design alterations, "
+                "construction administration tasks such as shop drawings review, "
+                "RFI response, site visits, and field repairs are not included "
+                "in the scope of basic services.")
+
     return f"Basic services shall include {joined}{tail}"
 
 
@@ -912,12 +1168,20 @@ def format_fee_cell(fee_line):
     return "Hourly"
 
 
-def render_fee_schedule(doc, fee_lines):
+def render_fee_schedule(doc, fee_lines, *, include_reimbursables=True):
     """
     Fill the FEE SCHEDULE table from fee_lines.
       - Rows whose Service has Include=False are REMOVED from the table.
       - Included rows get 'Words Dollars ($X,XXX.XX)' formatted cell text.
       - TOTAL row sums Fixed-Fee + 'not to exceed' amounts of included rows.
+
+    v2.1.8: `include_reimbursables` is False when the Brief's reimbursables
+    treatment is 'Digital Only' or 'Included in Fee'. In those cases:
+      - The 'Reimbursables' row in the fee schedule table is removed
+        (no row reading 'See REIMBURSABLE EXPENSES section of contract' /
+        'Reimbursables Per REIMBURSABLE EXPENSES section, as needed').
+      - The TOTAL row drops the '+ Reimbursables' suffix.
+    Standard treatment keeps both intact.
     """
     by_service = {fl["service"]: fl for fl in (fee_lines or [])}
 
@@ -949,6 +1213,13 @@ def render_fee_schedule(doc, fee_lines):
             fee_cell     = row.cells[1]
             service_name = service_cell.text.strip()
 
+            # v2.1.8: drop the Reimbursables row when reimbursables aren't
+            # billed separately (Digital Only / Included in Fee).
+            if (not include_reimbursables
+                    and service_name.lower() == "reimbursables"):
+                rows_to_remove.append(row)
+                continue
+
             if service_name in by_service:
                 fl = by_service[service_name]
                 if not fl.get("include"):
@@ -964,10 +1235,12 @@ def render_fee_schedule(doc, fee_lines):
                     ftype = (fl.get("type") or "").lower()
                     if ftype == "fixed fee" or "not to exceed" in ftype:
                         total += amt
+                # v2.1.8: '+ Reimbursables' suffix is conditional.
+                tail = " + Reimbursables" if include_reimbursables else ""
                 if total > 0:
-                    new_text = f"{dollars_to_words(total)} (${total:,.2f}) + Reimbursables"
+                    new_text = f"{dollars_to_words(total)} (${total:,.2f}){tail}"
                 else:
-                    new_text = "TBD + Reimbursables"
+                    new_text = f"TBD{tail}"
                 set_cell_text(fee_cell, new_text)
 
         for row in rows_to_remove:
